@@ -70,6 +70,30 @@ volatile uint16_t reflect_min;
 // Belt control
 #define SORTING_DUTY_CYCLE 0x30 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
 
+// Timer control
+#define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64
+#define TIMER1_PRESCALE _BV(CS11) // Prescale /8
+#define TIMER2_PRESCALE _BV (CS22) | _BV (CS21) | _BV (CS20)  //  Prescale /1024
+#define TIMER3_PRESCALE _BV (CS31)  //  Prescale /8
+volatile uint8_t countdown_reached;
+
+// timer 1 countdown
+void restart_countdown(uint16_t ms)
+{
+    /* Set the Waveform gen. mode bit description to clear
+        on compare mode only */
+    TCCR1B |= _BV(WGM12);
+    /* Initialize Timer 1 to zero */
+    countdown_reached = 0;
+
+    OCR1A = ms * 0x03E8;
+
+    TCNT1 = 0x0000;
+    // Countdown timer
+    TCCR1B |= TIMER1_PRESCALE;
+    TIFR1 |= _BV(OCF1A);
+}
+
 //--------------------  set_belt  --------------------
 
 inline void set_belt(char is_on)
@@ -86,7 +110,7 @@ void mTimer (int count)
 {
    int i = 0;
 
-   TCCR2B |= _BV (CS22) | _BV (CS21) | _BV (CS20);  //  sets prescalar to DIV 1024
+   TCCR2B |= TIMER2_PRESCALE;
    /* Set the Waveform gen. mode bit description to clear
      on compare mode only */
    TCCR2B |= _BV(WGM22);
@@ -105,7 +129,7 @@ void mTimer (int count)
 	  TIFR2 |= _BV(OCF2A);
 	  i++;
    } /* while */
-   TCCR2B &= 0xf8;  //  disable prescalar
+   TCCR2B &= ~(TIMER2_PRESCALE);  //  disable prescalar
    return;
 }
 
@@ -261,11 +285,11 @@ int main(){
 	// PWM
 	TCCR0A |= _BV(WGM01)|_BV(WGM00);
 	TCCR0A |= _BV(COM0A1); // Rests at top
-	TCCR0B |= _BV(CS01) | _BV(CS00); // Prescale /64
+	TCCR0B |= TIMER0_PRESCALE;
 	OCR0A = SORTING_DUTY_CYCLE; // Sets the OCRA value
 
 	// Steppper motor timer
-	TCCR3B |= _BV (CS31);  //  sets prescalar to DIV 8
+	TCCR3B |= TIMER3_PRESCALE;
    	OCR3A = 0x03E8; // use this to adjust timer 3 countdown value (20ms rn)
    	TCNT3 = 0x0000;
 	TIMSK3 |= 0x2; // use this to enable/disable COMPA interrupt
@@ -558,8 +582,6 @@ ISR(TIMER3_COMPA_vect)
 
 	uint8_t stepper_dir = 0;
 
- 	OCR3A = CURRENT_DELAY * 0x03E8;
-
 	//Clockwise movement
 	if(future_steps < 0)
 	{
@@ -606,7 +628,17 @@ ISR(TIMER3_COMPA_vect)
 		CURRENT_DELAY = CURRENT_DELAY - ACCELERATION;
 	}
 
-	TIFR3 |= _BV(OCF3A);
+    OCR3A = CURRENT_DELAY * 0x03E8;
+	//TIFR3 |= _BV(OCF3A);
+}
+
+//-------------------- TIMER 1 --------------------
+// Async countdown timer
+
+ISR(TIMER1_COMPA_vect)
+{
+    countdown_reached = 1;
+    TCCR1B &= ~(TIMER1_PRESCALE);  //  disable timer
 }
 
 // If an unexpected interrupt occurs (interrupt is enabled and no handler is installed,
