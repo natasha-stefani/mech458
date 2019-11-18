@@ -1,21 +1,13 @@
-// V2
 // Status: A-syncronous stepper motor contol 
 // 				- Multiple loading
 //				- Sorting correctly, taking shortest path
 //				- Acceleration is added
 
-// For those that are still having major problems, I've seen about 1/3 of the class with major problems in 
-// code structure. If you are still having major problems with your code, it's time to do a VERY quick overhaul.
-// I've provided a skeleton structure with an example using two input capture interrupts on PORTDA0 and A3
-// Please try this in the debugger.
-
 // Create a watch variable on STATE. To do this right click on the variable STATE and then
 // Add Watch 'STATE'. You can see how the variable changes as you click on PINDA0 or PINDA3. Note that the interrupt
 // catches a rising edge. You modify this to suit your needs.
 
-//#define F_CPU 8000000UL
-
-volatile int future_dir, current_dir, current_delay, predicted_steps, future_steps;
+//# define F_CPU 1000000UL // suppress compiler warnings
 
 #include <stdlib.h>
 #include <avr/interrupt.h>
@@ -34,50 +26,49 @@ typedef enum
 	WAITING_FOR_FIRST,
 	MOVING_ITEM_TO_GATE,
 	GATE_CHECK,
+	DROPPING_ITEM,
 	PAUSE,
 	RAMPDOWN
 } state_t;
 
 // Global Variables
+
+// State transition control
 volatile state_t state;
+volatile uint8_t BUCKET_COUNT;
+volatile uint8_t GATE_COUNT;
+volatile uint8_t is_paused;
 
-volatile uint16_t ADC_count;
-volatile uint16_t reflect_min;
+// Item queue
+link * head, * tail, * rtn_link, * unknown_item, * new_link;
 
+// Stepper motor control
+#define STEPPER_CW 0
+#define STEPPER_CCW 1
+const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
+volatile int16_t stepper_pos;
+volatile int16_t future_steps;
+// Stepper motor accel pattern
+#define ACCELERATION  2
+#define DECELERATION  2
+#define NUM_ACCEL_STEPS 6
+#define NUM_DECEL_STEPS 6
+#define FULL_SPEED 8
+#define DROP_STEP 4
+
+// Item categorization
+#define STEEL_BOUND 260
+#define WHITE_BOUND 700
+#define BLACK_BOUND 884
 volatile uint8_t BLK_COUNT;
 volatile uint8_t WHITE_COUNT;
 volatile uint8_t STEEL_COUNT;
 volatile uint8_t ALUM_COUNT;
+volatile uint16_t ADC_count;
+volatile uint16_t reflect_min;
 
-volatile uint8_t BUCKET_COUNT;
-volatile uint8_t GATE_COUNT;
-
-volatile uint8_t is_paused;
-
-// item queue
-link * head, * tail, * new_link, * rtn_link, * unknown_item;
-
-const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
-int8_t current_stepper;
-int16_t stepper_pos;
-
-int current_pos;
-
-#define STEEL_BOUND 260
-#define WHITE_BOUND 700
-#define BLACK_BOUND 884
-
-#define DUTY_CYCLE 0x30 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
-
-#define ACCELERATION  1
-#define DECELERATION  1
-#define NUM_ACCEL_STEPS 12
-#define NUM_DECEL_STEPS 12
-
-#define FULL_SPEED 6
-#define DROP_STEP 14
-
-volatile uint8_t CURRENT_DELAY = FULL_SPEED + ( ACCELERATION * NUM_ACCEL_STEPS );
+// Belt control
+#define SORTING_DUTY_CYCLE 0x30 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
 
 //--------------------  set_belt  --------------------
 
@@ -89,14 +80,11 @@ inline void set_belt(char is_on)
 		PORTD = 0;
 }
 
-
 //--------------------  mTimer  --------------------
 
 void mTimer (int count)
 {
-   int i;
-
-   i = 0;
+   int i = 0;
 
    TCCR1B |= _BV (CS10);  //  sets prescalar to DIV 1
    /* Set the Waveform gen. mode bit description to clear
@@ -122,22 +110,17 @@ void mTimer (int count)
 }
 
 //--------------------  stepper_movement  --------------------
-
+/*
 inline void stepper_movement ()
 {
+	stepper_table_pos++;
+	if(stepper_table_pos==4)
+		stepper_table_pos=0;
 
-	int8_t j = current_stepper;
-
-	j++;
-	if(j==4)
-		j=0;
-
-	PORTA = STEPPER_ARRAY[j];
+	PORTA = STEPPER_ARRAY[stepper_table_pos];
 	mTimer(20);
-
-	current_stepper = j;
 }
-
+*/
 //--------------------  categorize  --------------------
 
 inline material_t categorize(uint16_t reflect_min)
@@ -180,7 +163,10 @@ void zero_tray()
 
 	while ((PIND & 0b1000) != 0)
 	{
-		stepper_movement();
+		ATOMIC_BLOCK(ATOMIC_FORCEON)
+		{
+			future_steps = 1;
+		}
 	}
 	stepper_pos = 0;
 	LCDClear();
@@ -204,7 +190,6 @@ void unpause()
 
 void rampdown()
 {
-
 
 }
 
@@ -266,9 +251,6 @@ int main(){
 	ADMUX |= _BV(REFS0); 
 	ADMUX |= 0b1;
 
-
-// ----------   Starting Program   ----------  
-
 	//Initialize LCD module
 	InitLCD(LS_BLINK|LS_ULINE);
 
@@ -278,23 +260,18 @@ int main(){
 	TCCR0A |= _BV(WGM01)|_BV(WGM00);
 	TCCR0A |= _BV(COM0A1); // Rests at top
 	TCCR0B|=_BV(CS01); // Prescale /8
-	OCR0A = DUTY_CYCLE; // Sets the OCRA value 
+	OCR0A = SORTING_DUTY_CYCLE; // Sets the OCRA value 
 
 	// Steppper motor timer
 	TCCR3B |= _BV (CS30);  //  sets prescalar to DIV 1
-   	OCR3A = CURRENT_DELAY * 0x03E8; // use this to adjust timer 3 countdown value (20ms rn)
+   	OCR3A = 0x03E8; // use this to adjust timer 3 countdown value (20ms rn)
    	TCNT3 = 0x0000;
 	TIMSK3 |= 0x2; // use this to enable/disable COMPA interrupt
    	TCCR3B |= _BV(WGM32);
 	TIFR3 |= _BV(OCF3A); // clear interrupt flag and start timer
 
-	zero_tray(); // set initial tray position
-
 	// Enable all interrupts
-
 	sei();	// Note this sets the Global Enable for all interrupts
-
-	set_belt(1); // start DC motor
 
 	// init linked queue
 	setup(&head,&tail);
@@ -304,12 +281,16 @@ int main(){
 	enqueue(&head,&tail,&new_link);
 	unknown_item = head;
 
+	// set initial state
 	state = WAITING_FOR_FIRST;
+
+	zero_tray(); // set initial tray position
+	set_belt(1); // start DC motor
 
 	// main program loop starts
 	while(1)
 	{
-		switch (state)
+		switch(state)
 		{
 			case WAITING_FOR_FIRST:
 				set_belt(1);
@@ -319,9 +300,6 @@ int main(){
 				{
 					head_type = head->e.item_type;
 				}
-				
-			//	if (head_type != DUMMY && head_type != UNKNOWN)
-			//		state = MOVING_ITEM_TO_GATE;
 			break;			
 
 			case MOVING_ITEM_TO_GATE:;
@@ -333,7 +311,6 @@ int main(){
 				}
 	
 				const material_t future_item_type = head_item.item_type;
-				const uint16_t item_min = head_item.item_min;
 
 				int16_t target_position;
 				switch(future_item_type)
@@ -354,33 +331,27 @@ int main(){
 						target_position = stepper_pos;
 					break;
 				}
-
-				future_steps = target_position - stepper_pos;
-				if (future_steps > 100)
+				// CCW -> Positive future steps
+				// CW  -> Negative future steps
+				ATOMIC_BLOCK(ATOMIC_FORCEON)
 				{
-					future_steps = - 200 + future_steps;
+					future_steps = target_position - stepper_pos;
+					if (future_steps > 100)
+					{
+						future_steps = - 200 + future_steps;
+					}
+					else if (future_steps < -100)
+					{
+						future_steps =  200 - abs(future_steps);
+					}
 				}
-				else if (future_steps < -100)
-				{
-					future_steps =  200 - abs(future_steps);
-				}
-
+	
 				state = GATE_CHECK;
-
-
-			//	set_belt(1);
-
 			break;
 
 			case GATE_CHECK:;
 
-				int curr_future_steps;
-				ATOMIC_BLOCK(ATOMIC_FORCEON)
-				{
-					curr_future_steps =  future_steps;
-				}
-
-				if (abs(curr_future_steps) > DROP_STEP)
+				if (abs(future_steps) > DROP_STEP)
 				{
 					set_belt(0);
 					break;
@@ -389,7 +360,7 @@ int main(){
 				{
 					set_belt(1);
 
-					if (curr_future_steps == 0)
+					if (future_steps == 0)
 					{
 						BUCKET_COUNT++;
 						ATOMIC_BLOCK(ATOMIC_FORCEON)
@@ -443,10 +414,6 @@ int main(){
 							}
 							else
 								state = MOVING_ITEM_TO_GATE;
-						
-						
-							//mTimer(80);
-						
 						}
 						else
 						{
@@ -457,6 +424,7 @@ int main(){
 			break;
 			default:
 			break;
+		
 		}
 		// get first element of queue
 
@@ -492,8 +460,8 @@ int main(){
 //-------------------- ADC --------------------
 ISR(ADC_vect)
 {
+	const uint8_t ADC_low = ADCL;
 	uint16_t ADC_result = 0;
-	uint8_t ADC_low = ADCL;
 	ADC_result = ADCH;
 	ADC_result <<= 8;
 	ADC_result |= ADC_low;
@@ -504,20 +472,13 @@ ISR(ADC_vect)
 	ADC_count++;
 
 	if ((PIND & 0x01) > 0)
-	{
 		ADCSRA |= _BV(ADSC);
-	}
 	else
-
 	{
-//	 	if(unknown_item->e.item_type == DUMMY )
-//			update_ready = 1;
-
 		// classify unknown piece
 		unknown_item->e.item_min = reflect_min;
 		unknown_item->e.item_type = categorize(unknown_item->e.item_min);
 		unknown_item = unknown_item->next;
-	
 	}
 }
 
@@ -536,14 +497,11 @@ ISR(INT0_vect)
 
 ISR(INT1_vect)
 {
-	if(head == tail){
+	if(head == tail)
 		unknown_item->e.item_type = DUMMY;
-
-	}
 
 	initLink(&new_link);
 	new_link->e.item_type = UNKNOWN;
-	
 
 	enqueue(&head,&tail,&new_link);
 }
@@ -567,12 +525,9 @@ ISR(INT2_vect)
  
 ISR(INT6_vect)
 {
-// debounce
-
+// debounce ?
 	if (is_paused)
-	{
 		is_paused = 0;	
-	}
 	else
 	{
 		is_paused = 1;
@@ -595,18 +550,24 @@ ISR(INT7_vect)
 
 ISR(TIMER3_COMPA_vect)
 {
+	static uint8_t CURRENT_DELAY = FULL_SPEED + ( ACCELERATION * NUM_ACCEL_STEPS );
+	static uint8_t old_stepper_dir = STEPPER_CW;
+	static int8_t stepper_table_pos = 0;
 
+	uint8_t stepper_dir = 0;
 
-	int j = current_stepper;
-	
+ 	OCR3A = CURRENT_DELAY * 0x03E8;
+
 	//Clockwise movement
-	if(future_steps < 0){
+	if(future_steps < 0)
+	{
+		stepper_dir = STEPPER_CW;
 
-		j++;
-		if(j==4)
-			j=0;
+		stepper_table_pos++;
+		if(stepper_table_pos==4)
+			stepper_table_pos=0;
 
-		PORTA = STEPPER_ARRAY[j];
+		PORTA = STEPPER_ARRAY[stepper_table_pos];
 
 		stepper_pos--;
 		future_steps++;
@@ -614,16 +575,16 @@ ISR(TIMER3_COMPA_vect)
 		if (stepper_pos < 0)
 			stepper_pos = 199;
 
-
-
 	}	// Counter-Clockwise movement
-	if(future_steps > 0){
-		
-		j--;
-		if(j==-1)
-			j=3;
+	else if(future_steps > 0)
+	{	
+		stepper_dir = STEPPER_CCW;
 
-		PORTA = STEPPER_ARRAY[j];
+		stepper_table_pos--;
+		if(stepper_table_pos==-1)
+			stepper_table_pos=3;
+
+		PORTA = STEPPER_ARRAY[stepper_table_pos];
 			
 			
 		stepper_pos++;
@@ -631,24 +592,18 @@ ISR(TIMER3_COMPA_vect)
 		
 		if (stepper_pos >= 200)
 			stepper_pos = 0;
-		
 	}
-	if( abs(future_steps) < NUM_DECEL_STEPS ){
-		CURRENT_DELAY = CURRENT_DELAY + DECELERATION;
-	}
-	else if(CURRENT_DELAY > FULL_SPEED) {
-		CURRENT_DELAY = CURRENT_DELAY - ACCELERATION;
-	}
-	
 
-	current_stepper = j;
-
-	if (future_steps == 0)
+	if (future_steps == 0 || old_stepper_dir != stepper_dir)
 	{
+		old_stepper_dir = stepper_dir;
 		CURRENT_DELAY = FULL_SPEED + ( ACCELERATION * NUM_ACCEL_STEPS );
 	}
+	else if(CURRENT_DELAY > FULL_SPEED) 
+	{
+		CURRENT_DELAY = CURRENT_DELAY - ACCELERATION;
+	}
 
- 	OCR3A = CURRENT_DELAY * 0x03E8;
 	TIFR3 |= _BV(OCF3A);
 }
 
