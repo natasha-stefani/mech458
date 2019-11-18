@@ -1,4 +1,4 @@
-// Status: A-syncronous stepper motor contol 
+// Status: A-syncronous stepper motor contol
 // 				- Multiple loading
 //				- Sorting correctly, taking shortest path
 //				- Acceleration is added
@@ -7,7 +7,7 @@
 // Add Watch 'STATE'. You can see how the variable changes as you click on PINDA0 or PINDA3. Note that the interrupt
 // catches a rising edge. You modify this to suit your needs.
 
-//# define F_CPU 1000000UL // suppress compiler warnings
+# define F_CPU 8000000UL // suppress compiler warnings
 
 #include <stdlib.h>
 #include <avr/interrupt.h>
@@ -86,26 +86,26 @@ void mTimer (int count)
 {
    int i = 0;
 
-   TCCR1B |= _BV (CS10);  //  sets prescalar to DIV 1
+   TCCR2B |= _BV (CS22) | _BV (CS21) | _BV (CS20);  //  sets prescalar to DIV 1024
    /* Set the Waveform gen. mode bit description to clear
      on compare mode only */
-   TCCR1B |= _BV(WGM12);
-   /* Set output compare register for 1000 cycles, 1ms */
-   OCR1A = 0x03E8;
-   /* Initialize Timer 1 to zero */
-   TCNT1 = 0x0000;
+   TCCR2B |= _BV(WGM22);
+   /* Set output compare register for 8 cycles, 1.024 ms */
+   OCR2A = 8;
+   /* Initialize Timer 2 to zero */
+   TCNT2 = 0x0000;
    /* Clear the timer interrupt flag and begin timing */
-   TIFR1 |= _BV(OCF1A);
+   TIFR2 |= _BV(OCF2A);
 
    /* Poll the timer to determine when the timer has reached 1ms */
    while (i < count)
    {
-      while ((TIFR1 & 0x02) != 0x02);
+      while ((TIFR2 & 0x02) != 0x02);
 	  /* Clear the interrupt flag by WRITING a ONE to the bit */
-	  TIFR1 |= _BV(OCF1A);
+	  TIFR2 |= _BV(OCF2A);
 	  i++;
    } /* while */
-   TCCR1B &= ~_BV (CS10);  //  disable prescalar
+   TCCR2B &= 0xf8;  //  disable prescalar
    return;
 }
 
@@ -199,7 +199,9 @@ int main(){
 
 	cli();	// Disables all interrupts
 
-	// Going to set up interrupt0 on PD0
+    // Disable system clock prescaling - run at full 8MHz
+    CLKPR=(1<<CLKPCE);
+    CLKPR=0;
 
 	// pin F1 RL
 	// pin D0 OR
@@ -208,12 +210,12 @@ int main(){
 	DDRA = 0xFF;
 	DDRB |= 0x80; // Sets OC0A pin to output (B7 pin)
 	DDRC = 0xFF;	// just use as a display
-	DDRD |= 0xf0;	// DC motor control out and 
+	DDRD |= 0xf0;	// DC motor control out and
 	DDRE = 0x00; // Button input
 
 	set_belt(0); // disable DC motor
 
-// ----------   CONFIGURING INTERRUPTS    ----------  
+// ----------   CONFIGURING INTERRUPTS    ----------
 
 	// OR / ADC sensor
 	EIMSK |= (_BV(INT0)); // enable INT0
@@ -248,7 +250,7 @@ int main(){
 	// the ADC input (analog input is set to be ADC1 / PORTF1
 	ADCSRA |= _BV(ADEN); // enable ADC
 	ADCSRA |= _BV(ADIE); // enable interrupt of ADC
-	ADMUX |= _BV(REFS0); 
+	ADMUX |= _BV(REFS0);
 	ADMUX |= 0b1;
 
 	//Initialize LCD module
@@ -256,14 +258,14 @@ int main(){
 
 	lcd_message("Starting prog...");
 
-	// PWM 
+	// PWM
 	TCCR0A |= _BV(WGM01)|_BV(WGM00);
 	TCCR0A |= _BV(COM0A1); // Rests at top
-	TCCR0B|=_BV(CS01); // Prescale /8
-	OCR0A = SORTING_DUTY_CYCLE; // Sets the OCRA value 
+	TCCR0B |= _BV(CS01) | _BV(CS00); // Prescale /64
+	OCR0A = SORTING_DUTY_CYCLE; // Sets the OCRA value
 
 	// Steppper motor timer
-	TCCR3B |= _BV (CS30);  //  sets prescalar to DIV 1
+	TCCR3B |= _BV (CS31);  //  sets prescalar to DIV 8
    	OCR3A = 0x03E8; // use this to adjust timer 3 countdown value (20ms rn)
    	TCNT3 = 0x0000;
 	TIMSK3 |= 0x2; // use this to enable/disable COMPA interrupt
@@ -295,12 +297,12 @@ int main(){
 			case WAITING_FOR_FIRST:
 				set_belt(1);
 
-				material_t head_type;				
+				material_t head_type;
 				ATOMIC_BLOCK(ATOMIC_FORCEON)
 				{
 					head_type = head->e.item_type;
 				}
-			break;			
+			break;
 
 			case MOVING_ITEM_TO_GATE:;
 
@@ -309,7 +311,7 @@ int main(){
 				{
 					head_item = head->e;
 				}
-	
+
 				const material_t future_item_type = head_item.item_type;
 
 				int16_t target_position;
@@ -345,7 +347,7 @@ int main(){
 						future_steps =  200 - abs(future_steps);
 					}
 				}
-	
+
 				state = GATE_CHECK;
 			break;
 
@@ -398,15 +400,15 @@ int main(){
 #endif
 
 						free(rtn_link);
-					
-						material_t head_type;				
+
+						material_t head_type;
 						ATOMIC_BLOCK(ATOMIC_FORCEON)
 						{
 							head_type = head->e.item_type;
 						}
-				
+
 						if (head_type != DUMMY && head_type != UNKNOWN)
-						{	
+						{
 							// is real item at head
 						 	if(BUCKET_COUNT == GATE_COUNT){
 								set_belt(1);
@@ -424,7 +426,7 @@ int main(){
 			break;
 			default:
 			break;
-		
+
 		}
 		// get first element of queue
 
@@ -433,7 +435,7 @@ int main(){
 /*
 	PAUSE_STAGE:
 		LCDClear();
-		lcd_message("Paused!");	
+		lcd_message("Paused!");
 		set_belt(0);
 		while(is_paused);
 		LCDClear();
@@ -443,10 +445,10 @@ int main(){
 
 	RAMP_STAGE:
 		LCDClear();
-		lcd_message("Rampdown!");	
+		lcd_message("Rampdown!");
 		while(is_paused);
 		LCDClear();
-		mTimer(20);		
+		mTimer(20);
 		STATE = POLLING;
 		goto POLLING_STAGE;
 */
@@ -465,7 +467,7 @@ ISR(ADC_vect)
 	ADC_result = ADCH;
 	ADC_result <<= 8;
 	ADC_result |= ADC_low;
-	
+
 	if(reflect_min > ADC_result)
 		reflect_min = ADC_result;
 
@@ -522,17 +524,17 @@ ISR(INT2_vect)
 // Starts or stops the belt
 
 // Will need to also stop to pause the stepper motor as well.
- 
+
 ISR(INT6_vect)
 {
 // debounce ?
 	if (is_paused)
-		is_paused = 0;	
+		is_paused = 0;
 	else
 	{
 		is_paused = 1;
 		state = PAUSE;
-	}	
+	}
 }
 
 //-------------------- RAMP_DOWN --------------------
@@ -577,7 +579,7 @@ ISR(TIMER3_COMPA_vect)
 
 	}	// Counter-Clockwise movement
 	else if(future_steps > 0)
-	{	
+	{
 		stepper_dir = STEPPER_CCW;
 
 		stepper_table_pos--;
@@ -585,11 +587,11 @@ ISR(TIMER3_COMPA_vect)
 			stepper_table_pos=3;
 
 		PORTA = STEPPER_ARRAY[stepper_table_pos];
-			
-			
+
+
 		stepper_pos++;
 		future_steps--;
-		
+
 		if (stepper_pos >= 200)
 			stepper_pos = 0;
 	}
@@ -599,7 +601,7 @@ ISR(TIMER3_COMPA_vect)
 		old_stepper_dir = stepper_dir;
 		CURRENT_DELAY = FULL_SPEED + ( ACCELERATION * NUM_ACCEL_STEPS );
 	}
-	else if(CURRENT_DELAY > FULL_SPEED) 
+	else if(CURRENT_DELAY > FULL_SPEED)
 	{
 		CURRENT_DELAY = CURRENT_DELAY - ACCELERATION;
 	}
@@ -608,8 +610,8 @@ ISR(TIMER3_COMPA_vect)
 }
 
 // If an unexpected interrupt occurs (interrupt is enabled and no handler is installed,
-// which usually indicates a bug), then the default action is to reset the device by jumping 
-// to the reset vector. You can override this by supplying a function named BADISR_vect which 
+// which usually indicates a bug), then the default action is to reset the device by jumping
+// to the reset vector. You can override this by supplying a function named BADISR_vect which
 // should be defined with ISR() as such. (The name BADISR_vect is actually an alias for __vector_default.
 // The latter must be used inside assembly code in case <avr/interrupt.h> is not included.
 ISR(BADISR_vect)
