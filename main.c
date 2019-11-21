@@ -28,10 +28,27 @@ typedef enum
 	GATE_CHECK,
 	DROPPING_ITEM,
 	PAUSE,
-	RAMPDOWN
+	RAMPDOWN,
+	BADISR
 } state_t;
 
 // Global Variables
+
+const uint16_t ACCEL_TABLE[] =
+{
+//	20000,18000,15500,13000,10500,8000
+20000,18000,16000,14000,12000,10000,8000
+};
+
+const uint16_t DECEL_TABLE[] =
+{	
+//	22000,19000,17000,15500,13000,10500,8000
+20000,18000,16000,14000,12000,10000,8000
+
+};
+
+const uint8_t ACCEL_MAX_IDX = sizeof(ACCEL_TABLE) / sizeof(uint16_t);
+const uint8_t DECEL_MAX_IDX = sizeof(DECEL_TABLE) / sizeof(uint16_t);
 
 // State transition control
 volatile state_t state;
@@ -47,14 +64,14 @@ link * head, * tail, * rtn_link, * unknown_item, * new_link;
 #define STEPPER_CCW 1
 const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
 volatile int16_t stepper_pos;
-volatile int16_t future_steps;
+volatile int16_t future_steps, starting_future_steps;
 // Stepper motor accel pattern
 #define ACCELERATION  2
 #define DECELERATION  2
 #define NUM_ACCEL_STEPS 6
 #define NUM_DECEL_STEPS 6
 #define FULL_SPEED 8
-#define DROP_STEP 4
+#define DROP_STEP 20
 
 // Item categorization
 #define STEEL_BOUND 260
@@ -68,30 +85,27 @@ volatile uint16_t ADC_count;
 volatile uint16_t reflect_min;
 
 // Belt control
-#define SORTING_DUTY_CYCLE 0x30 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
+#define SORTING_DUTY_CYCLE 0x38 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
 
 // Timer control
-#define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64
-#define TIMER1_PRESCALE _BV(CS11) // Prescale /8
-#define TIMER2_PRESCALE _BV (CS22) | _BV (CS21) | _BV (CS20)  //  Prescale /1024
-#define TIMER3_PRESCALE _BV (CS31)  //  Prescale /8
+#define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64 -> PWM timer
+#define TIMER1_PRESCALE _BV(CS12) // Prescale /256 -> Countdown timer
+#define TIMER3_PRESCALE _BV (CS31)  //  Prescale /8 -> Stepper timer
 volatile uint8_t countdown_reached;
 
 // timer 1 countdown
+// input value must be less than ~2100ms
 void restart_countdown(uint16_t ms)
 {
-    /* Set the Waveform gen. mode bit description to clear
-        on compare mode only */
-    TCCR1B |= _BV(WGM12);
     /* Initialize Timer 1 to zero */
     countdown_reached = 0;
 
-    OCR1A = ms * 0x03E8;
+    OCR1A = ms * 31;
 
-    TCNT1 = 0x0000;
     // Countdown timer
-    TCCR1B |= TIMER1_PRESCALE;
+    TCNT1 = 0x0000;
     TIFR1 |= _BV(OCF1A);
+	TCCR1B |= TIMER1_PRESCALE;
 }
 
 //--------------------  set_belt  --------------------
@@ -104,35 +118,6 @@ inline void set_belt(char is_on)
 		PORTD = 0;
 }
 
-//--------------------  mTimer  --------------------
-
-void mTimer (int count)
-{
-   int i = 0;
-
-   TCCR2B |= TIMER2_PRESCALE;
-   /* Set the Waveform gen. mode bit description to clear
-     on compare mode only */
-   TCCR2B |= _BV(WGM22);
-   /* Set output compare register for 8 cycles, 1.024 ms */
-   OCR2A = 8;
-   /* Initialize Timer 2 to zero */
-   TCNT2 = 0x0000;
-   /* Clear the timer interrupt flag and begin timing */
-   TIFR2 |= _BV(OCF2A);
-
-   /* Poll the timer to determine when the timer has reached 1ms */
-   while (i < count)
-   {
-      while ((TIFR2 & 0x02) != 0x02);
-	  /* Clear the interrupt flag by WRITING a ONE to the bit */
-	  TIFR2 |= _BV(OCF2A);
-	  i++;
-   } /* while */
-   TCCR2B &= ~(TIMER2_PRESCALE);  //  disable prescalar
-   return;
-}
-
 //--------------------  stepper_movement  --------------------
 /*
 inline void stepper_movement ()
@@ -142,7 +127,7 @@ inline void stepper_movement ()
 		stepper_table_pos=0;
 
 	PORTA = STEPPER_ARRAY[stepper_table_pos];
-	mTimer(20);
+	_delay_ms(20);
 }
 */
 //--------------------  categorize  --------------------
@@ -173,11 +158,11 @@ inline material_t categorize(uint16_t reflect_min)
 
 //--------------------  lcd_message  --------------------
 
-inline void lcd_message(const char * msg)
+static inline void lcd_message(const char * msg)
 {
 	LCDClear();
 	LCDWriteString(msg);
-	mTimer(20);
+	_delay_ms(20);
 }
 
 //--------------------   zero_tray   --------------------
@@ -190,6 +175,7 @@ void zero_tray()
 		ATOMIC_BLOCK(ATOMIC_FORCEON)
 		{
 			future_steps = 1;
+			_delay_ms(20);
 		}
 	}
 	stepper_pos = 0;
@@ -235,7 +221,7 @@ int main(){
 	DDRB |= 0x80; // Sets OC0A pin to output (B7 pin)
 	DDRC = 0xFF;	// just use as a display
 	DDRD |= 0xf0;	// DC motor control out and
-	DDRE = 0x00; // Button input
+	DDRE = 0x1; // Button input, E0 output
 
 	set_belt(0); // disable DC motor
 
@@ -274,6 +260,9 @@ int main(){
 	// the ADC input (analog input is set to be ADC1 / PORTF1
 	ADCSRA |= _BV(ADEN); // enable ADC
 	ADCSRA |= _BV(ADIE); // enable interrupt of ADC
+	ADCSRA |= _BV(ADPS2) | _BV(ADPS1); // Enable prescale 64x (8MHz -> 125kHz)
+	//ADCSRA |= _BV(ADPS2) | _BV(ADPS0); // Enable prescale 32x (8MHz -> 250kHz)
+	ADCSRB |= _BV(ADHSM);
 	ADMUX |= _BV(REFS0);
 	ADMUX |= 0b1;
 
@@ -288,13 +277,17 @@ int main(){
 	TCCR0B |= TIMER0_PRESCALE;
 	OCR0A = SORTING_DUTY_CYCLE; // Sets the OCRA value
 
+	// Countdown timer
+    TCCR1B |= _BV(WGM12); // CTC mode
+	TIMSK1 |= 0x2; // use this to enable/disable COMPA interrupt
+
 	// Steppper motor timer
-	TCCR3B |= TIMER3_PRESCALE;
-   	OCR3A = 0x03E8; // use this to adjust timer 3 countdown value (20ms rn)
+   	OCR3A = 0x03E8; // use this to adjust timer 3 countdown value (1ms rn)
    	TCNT3 = 0x0000;
 	TIMSK3 |= 0x2; // use this to enable/disable COMPA interrupt
    	TCCR3B |= _BV(WGM32);
 	TIFR3 |= _BV(OCF3A); // clear interrupt flag and start timer
+	TCCR3B |= TIMER3_PRESCALE;
 
 	// Enable all interrupts
 	sei();	// Note this sets the Global Enable for all interrupts
@@ -359,6 +352,7 @@ int main(){
 				}
 				// CCW -> Positive future steps
 				// CW  -> Negative future steps
+			
 				ATOMIC_BLOCK(ATOMIC_FORCEON)
 				{
 					future_steps = target_position - stepper_pos;
@@ -370,6 +364,7 @@ int main(){
 					{
 						future_steps =  200 - abs(future_steps);
 					}
+					starting_future_steps = future_steps;
 				}
 
 				state = GATE_CHECK;
@@ -420,7 +415,7 @@ int main(){
 						LCDWriteIntXY(0,1,rtn_link->e.item_min,4);
 						LCDWriteIntXY(14,0,size(&head,&tail),2);
 						LCDWriteIntXY(6,1,ADC_count,5);
-						mTimer(20);
+						_delay_ms(20);
 #endif
 
 						free(rtn_link);
@@ -448,10 +443,22 @@ int main(){
 					}
 				}
 			break;
+			case BADISR:
+
+			set_belt(0);
+			lcd_message("Congrats, u suck");
+			cli();
+
+			while (1);
+
+
+
+			break;
 			default:
 			break;
 
 		}
+
 		// get first element of queue
 
 
@@ -472,7 +479,7 @@ int main(){
 		lcd_message("Rampdown!");
 		while(is_paused);
 		LCDClear();
-		mTimer(20);
+		_delay_ms(20);
 		STATE = POLLING;
 		goto POLLING_STAGE;
 */
@@ -567,7 +574,7 @@ ISR(INT6_vect)
 ISR(INT7_vect)
 {
 // debounce?
-	mTimer(20);
+	_delay_ms(20);
 	state = RAMPDOWN;
 }
 
@@ -576,16 +583,39 @@ ISR(INT7_vect)
 
 ISR(TIMER3_COMPA_vect)
 {
-	static uint8_t CURRENT_DELAY = FULL_SPEED + ( ACCELERATION * NUM_ACCEL_STEPS );
 	static uint8_t old_stepper_dir = STEPPER_CW;
 	static int8_t stepper_table_pos = 0;
 
 	uint8_t stepper_dir = 0;
+	if(future_steps < 0)
+		stepper_dir = STEPPER_CW;
+	else if(future_steps > 0)
+		stepper_dir = STEPPER_CCW;
 
-	//Clockwise movement
+	static uint16_t CURRENT_DELAY = 20000;
+	uint8_t decel_idx = abs(future_steps);
+	uint8_t accel_idx = abs(starting_future_steps) - abs(future_steps);
+	
+	if (old_stepper_dir != stepper_dir)
+	{
+		old_stepper_dir = stepper_dir;
+		CURRENT_DELAY = 25000;
+	}
+	else if (decel_idx < DECEL_MAX_IDX)
+	{
+		CURRENT_DELAY = DECEL_TABLE[decel_idx];
+	}	
+	else if (accel_idx < ACCEL_MAX_IDX)
+	{
+		CURRENT_DELAY = ACCEL_TABLE[accel_idx];
+	}
+
+	TCNT3 = 0;
+    OCR3A = CURRENT_DELAY;
+
 	if(future_steps < 0)
 	{
-		stepper_dir = STEPPER_CW;
+		//stepper_dir = STEPPER_CW;
 
 		stepper_table_pos++;
 		if(stepper_table_pos==4)
@@ -602,7 +632,7 @@ ISR(TIMER3_COMPA_vect)
 	}	// Counter-Clockwise movement
 	else if(future_steps > 0)
 	{
-		stepper_dir = STEPPER_CCW;
+		//stepper_dir = STEPPER_CCW;
 
 		stepper_table_pos--;
 		if(stepper_table_pos==-1)
@@ -617,19 +647,6 @@ ISR(TIMER3_COMPA_vect)
 		if (stepper_pos >= 200)
 			stepper_pos = 0;
 	}
-
-	if (future_steps == 0 || old_stepper_dir != stepper_dir)
-	{
-		old_stepper_dir = stepper_dir;
-		CURRENT_DELAY = FULL_SPEED + ( ACCELERATION * NUM_ACCEL_STEPS );
-	}
-	else if(CURRENT_DELAY > FULL_SPEED)
-	{
-		CURRENT_DELAY = CURRENT_DELAY - ACCELERATION;
-	}
-
-    OCR3A = CURRENT_DELAY * 0x03E8;
-	//TIFR3 |= _BV(OCF3A);
 }
 
 //-------------------- TIMER 1 --------------------
@@ -649,4 +666,5 @@ ISR(TIMER1_COMPA_vect)
 ISR(BADISR_vect)
 {
     // user code here
+	state = BADISR;
 }
