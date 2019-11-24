@@ -3,8 +3,8 @@
 
 typedef enum
 {
-	CW,
-	CCW,
+	STEPPER_CW,
+	STEPPER_CCW,
 	STOP
 } direction_t;
 
