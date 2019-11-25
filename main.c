@@ -19,7 +19,7 @@
 #include "linked_queue.h"
 #include "defs.h"
 
-#define LCD_DEBUG // Have LCD show current sorting progress
+//#define LCD_DEBUG // Have LCD show current sorting progress
 
 typedef enum
 {
@@ -36,19 +36,17 @@ typedef enum
 
 const uint16_t ACCEL_TABLE[] =
 {
-//	20000,18000,15500,13000,10500,8000
-20000,18000,16000,14000,12000,10000,8000, 7000, 6500
+    20000,18000,16000,14000,11500,9000,8000,7500,7000,6500,6000,5750
+//    20000,18000,16000,14000,11500,9000,8000,7500,7000,6500,6000,5750,5500
 };
 
 const uint16_t DECEL_TABLE[] =
 {
-//	22000,19000,17000,15500,13000,10500,8000
-20000,18000,16000,14000,12000,10000,8000, 7000, 6500
-
+    20000,18000,16000,13000,10000,8000,7000,6000
 };
 
 const uint8_t ACCEL_TABLE_SIZE = sizeof(ACCEL_TABLE) / sizeof(uint16_t);
-const uint8_t DECEL_MAX_IDX = sizeof(DECEL_TABLE) / sizeof(uint16_t);
+const uint8_t DECEL_TABLE_SIZE = sizeof(DECEL_TABLE) / sizeof(uint16_t);
 
 // State transition control
 volatile state_t state;
@@ -64,13 +62,14 @@ const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
 volatile int8_t stepper_table_pos;
 volatile int16_t stepper_pos, initial_position, target_position, initial_future_steps;
 volatile int16_t future_steps = 0;
-#define REVERSAL_DELAY 50000
-#define DROP_STEP 20
+#define REVERSAL_DELAY 65000
+#define DROP_STEP 25
+#define ZEROING_OFFSET 11
 
 // Item categorization
 #define STEEL_BOUND 260
 #define WHITE_BOUND 700
-#define BLACK_BOUND 884
+#define BLACK_BOUND 970
 volatile uint8_t BLK_COUNT;
 volatile uint8_t WHITE_COUNT;
 volatile uint8_t STEEL_COUNT;
@@ -114,13 +113,23 @@ inline void set_belt(char is_on)
 
 //--------------------  stepper_movement  --------------------
 
-static inline void stepper_movement ()
+static inline void stepper_movement (direction_t dir)
 {
-	stepper_table_pos++;
-	if(stepper_table_pos==4)
-		stepper_table_pos=0;
 
-	PORTA = STEPPER_ARRAY[stepper_table_pos];
+    if (dir == STEPPER_CW)
+    {
+    	stepper_table_pos++;
+    	if(stepper_table_pos==4)
+    		stepper_table_pos=0;
+    }
+    else if (dir == STEPPER_CCW)
+    {
+		stepper_table_pos--;
+		if(stepper_table_pos==-1)
+			stepper_table_pos=3;
+    }
+	
+    PORTA = STEPPER_ARRAY[stepper_table_pos];
 	_delay_ms(20);
 }
 
@@ -165,9 +174,14 @@ void zero_tray()
 	lcd_message("Calibrating tray..");
 
 	while ((PIND & 0b1000) != 0)
-		stepper_movement();
+		stepper_movement(STEPPER_CW);
 
-	stepper_pos = 0;
+    for (int i = 0; i < ZEROING_OFFSET; i++)
+    {
+        stepper_movement(STEPPER_CCW);
+    }
+	
+    stepper_pos = 0;
 	LCDClear();
 
 	lcd_message("Waiting for item..");
@@ -382,7 +396,9 @@ int main(){
 				}
 				else
 				{
-					set_belt(1);
+                    if (BUCKET_COUNT + 1 == GATE_COUNT)
+        				set_belt(1);
+
 
 					if (remaining_steps == 0)
 					{
@@ -601,7 +617,6 @@ ISR(TIMER3_COMPA_vect)
 	else if (future_steps < -100)
 		future_steps =  200 - abs(future_steps);
 
-	prev_direction = curr_direction;
 	if (future_steps < 0)
 		curr_direction = STEPPER_CW;
 	else if (future_steps > 0)
@@ -615,21 +630,16 @@ ISR(TIMER3_COMPA_vect)
         if (curr_direction == STOP)
             goto ISR_TIMER_RESET;
 
-        if (future_steps < ACCEL_TABLE_SIZE)
+        if (abs(future_steps) < DECEL_TABLE_SIZE)
         {
-            if (accel_idx > 0)
-                accel_idx --;
+            CURRENT_DELAY = DECEL_TABLE[abs(future_steps)];
         }
-		else if (accel_idx < ACCEL_TABLE_SIZE - 1)
-            accel_idx++;
-
-        // temporary guard again out of index errors
-        if (accel_idx < 0 || accel_idx > ACCEL_TABLE_SIZE - 1)
+        else
         {
-            state = BADISR;
-            return;
+    		if (accel_idx < ACCEL_TABLE_SIZE - 1)
+                accel_idx++;
+            CURRENT_DELAY = ACCEL_TABLE[accel_idx];
         }
-        CURRENT_DELAY = ACCEL_TABLE[accel_idx];
 	}
 	else if (prev_direction == STOP) // starting
 	{
@@ -678,7 +688,10 @@ ISR(TIMER3_COMPA_vect)
 	}
 
 ISR_TIMER_RESET:
+	prev_direction = curr_direction;
 	TCNT3 = 0;
+    if (curr_direction == STEPPER_CCW)
+        CURRENT_DELAY += 1000;
     OCR3A = CURRENT_DELAY;
 }
 
