@@ -63,13 +63,13 @@ volatile int8_t stepper_table_pos;
 volatile int16_t stepper_pos, initial_position, target_position, initial_future_steps;
 volatile int16_t future_steps = 0;
 #define REVERSAL_DELAY 65000
-#define DROP_STEP 25
-#define ZEROING_OFFSET 11
+#define DROP_STEP 10
+#define ZEROING_OFFSET 8
 
 // Item categorization
 #define STEEL_BOUND 260
 #define WHITE_BOUND 700
-#define BLACK_BOUND 970
+#define BLACK_BOUND 960
 volatile uint8_t BLK_COUNT;
 volatile uint8_t WHITE_COUNT;
 volatile uint8_t STEEL_COUNT;
@@ -78,7 +78,7 @@ volatile uint16_t ADC_count;
 volatile uint16_t reflect_min;
 
 // Belt control
-#define SORTING_DUTY_CYCLE 0x38 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
+#define SORTING_DUTY_CYCLE 50 //0x38 56 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
 
 // Timer control
 #define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64 -> PWM timer
@@ -334,6 +334,7 @@ int main(){
 	// main program loop starts
 	while(1)
 	{
+        _delay_ms(1);
 		switch(state)
 		{
 			case WAITING_FOR_FIRST:
