@@ -100,8 +100,10 @@ volatile int8_t stepper_table_pos;
 volatile int16_t stepper_pos, initial_position, target_position, initial_future_steps;
 //volatile int16_t future_steps = 0;
 #define REVERSAL_DELAY 55000
+#define REVERSAL_COUNTDOWN_MS 350
 #define DROP_STEP 55
-#define ZEROING_OFFSET 7
+#define ZEROING_OFFSET 12
+volatile uint16_t CURRENT_DELAY = 14000;
 
 // Item categorization
 #define STEEL_BOUND 260
@@ -121,7 +123,7 @@ volatile uint16_t reflect_min;
 #define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64 -> PWM timer
 #define TIMER1_PRESCALE _BV(CS12) // Prescale /256 -> Countdown timer
 #define TIMER3_PRESCALE _BV (CS31)  //  Prescale /8 -> Stepper timer
-volatile uint8_t countdown_reached;
+volatile uint8_t countdown_reached = 1;
 
 // timer 1 countdown
 // input value must be less than ~2100ms
@@ -242,7 +244,7 @@ void rampdown()
 {
 
 }
-/*
+
 void stepper_move(uint16_t target_pos)
 {
 	// calculate which way you need to go
@@ -304,10 +306,9 @@ void stepper_move(uint16_t target_pos)
         _delay_us(CURRENT_DELAY);
     }
 
-    _delay_ms(300);
+    _delay_ms(1000);
 }
-*/
-// ONLY USE THIS TO CONTROL STEPPER
+
 void set_stepper_target(int16_t target)
 {
 
@@ -416,7 +417,7 @@ int main(){
 	TCCR3B |= TIMER3_PRESCALE;
 
 	// Enable all interrupts
-	sei();	// Note this sets the Global Enable for all interrupts
+	//sei();	// Note this sets the Global Enable for all interrupts
 
 	// init linked queue
 	setup(&head,&tail);
@@ -431,13 +432,23 @@ int main(){
 
 	zero_tray(); // set initial tray position
 
-/*
+    stepper_move(50);
+    stepper_move(150);
+    stepper_move(50);
+    stepper_move(150);
+    stepper_move(50);
+    stepper_move(150);
     stepper_move(50);
     stepper_move(150);
     stepper_move(50);
     stepper_move(100);
+    stepper_move(50);
+    stepper_move(100);
+    stepper_move(50);
+    stepper_move(100);
     stepper_move(0);
-*/
+
+    while(1);
 
 	set_belt(1); // start DC motor
 
@@ -499,17 +510,26 @@ int main(){
 						remaining_steps =  200 - abs(remaining_steps);
 				}
 
-
 				if (abs(remaining_steps) > DROP_STEP)
 				{
 					set_belt(0);
 					break;
 				}
+                else if (CURRENT_DELAY > ACCEL_TABLE[5] && abs(remaining_steps) != 0)
+                {
+                    set_belt(0);
+                    break;
+                }
 				else
 				{
                     if (BUCKET_COUNT + 1 == GATE_COUNT)
-        				set_belt(1);
-
+        			{	
+                        set_belt(1);
+                        if (remaining_steps == 0)
+                        {
+                            _delay_ms(100);
+                        }
+                    }
 
 					if (remaining_steps == 0)
 					{
@@ -717,18 +737,20 @@ ISR(TIMER3_COMPA_vect)
 {
 	static direction_t curr_direction = STOP;
 	static direction_t prev_direction = STOP;
-	static uint16_t CURRENT_DELAY = 20000;
-    static uint8_t reversal_count = 0;
 	// calculate which way you need to go
 	// CCW -> Positive future steps
 	// CW  -> Negative future steps
 
-    if (reversal_count)
+    static uint8_t stop_switch_flag = 0;
+    if(stop_switch_flag)
     {
-        reversal_count--;
-        TCNT3 = 0;
-        OCR3A = CURRENT_DELAY;
-        return;
+        if (countdown_reached)
+        {
+            countdown_reached = 0;
+            stop_switch_flag = 0;
+        }
+        else
+            return;
     }
 
 	int16_t future_steps = target_position - stepper_pos;
@@ -742,7 +764,11 @@ ISR(TIMER3_COMPA_vect)
 	else if (future_steps > 0)
 		curr_direction = STEPPER_CCW;
 	else // stopping
+    {
 		curr_direction = STOP;
+        //stop_switch_flag = 1;
+        //restart_countdown(REVERSAL_COUNTDOWN_MS);
+    }
 
     static int8_t accel_idx = 0;
     if (curr_direction == prev_direction) // cruising
@@ -766,7 +792,7 @@ ISR(TIMER3_COMPA_vect)
 	else if (prev_direction == STOP) // starting
 	{
     	accel_idx = 0;
-        reversal_count = 2;
+
     	CURRENT_DELAY = REVERSAL_DELAY;
         goto ISR_TIMER_RESET;
 	}
@@ -779,7 +805,8 @@ ISR(TIMER3_COMPA_vect)
     else // switching directions
     {
         accel_idx = -1;
-        reversal_count = 3;
+        stop_switch_flag = 1;
+        restart_countdown(REVERSAL_COUNTDOWN_MS);
         CURRENT_DELAY = REVERSAL_DELAY;
         goto ISR_TIMER_RESET;
     }
