@@ -36,14 +36,51 @@ typedef enum
 
 const uint16_t ACCEL_TABLE[] =
 {
-    20000,18000,16000,14000,11500,9000,8000,7500,7000,6500,6000,5750
-//    20000,18000,16000,14000,11500,9000,8000,7500,7000,6500,6000,5750,5500
+       14000,
+       13680,
+       13375,
+       13084,
+       12197,
+       11423,
+       10023,
+        8929,
+        8051,
+        7329,
+        6727,
+        6216,
+        5777,
+        5396,
+        5239,
+        5090,
+        5048,
+        5005,
+        4964
+
+/*
+
+// Best profile so far
+       14000,
+       13475,
+       12989,
+       12537,
+       11004,
+        9805,
+        8842,
+        8051,
+        7390,
+        6829,
+        6347,
+        5929,
+        5833,
+        5740,
+        5650,
+        5550,
+        5400,
+        5300
+*/
 };
 
-const uint16_t DECEL_TABLE[] =
-{
-    20000,18000,16000,13000,10000,8000,7000,6000
-};
+const uint16_t * DECEL_TABLE = ACCEL_TABLE;
 
 const uint8_t ACCEL_TABLE_SIZE = sizeof(ACCEL_TABLE) / sizeof(uint16_t);
 const uint8_t DECEL_TABLE_SIZE = sizeof(DECEL_TABLE) / sizeof(uint16_t);
@@ -61,10 +98,10 @@ link * head, * tail, * rtn_link, * unknown_item, * new_link;
 const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
 volatile int8_t stepper_table_pos;
 volatile int16_t stepper_pos, initial_position, target_position, initial_future_steps;
-volatile int16_t future_steps = 0;
+//volatile int16_t future_steps = 0;
 #define REVERSAL_DELAY 65000
-#define DROP_STEP 10
-#define ZEROING_OFFSET 8
+#define DROP_STEP 25
+#define ZEROING_OFFSET 7
 
 // Item categorization
 #define STEEL_BOUND 260
@@ -78,7 +115,7 @@ volatile uint16_t ADC_count;
 volatile uint16_t reflect_min;
 
 // Belt control
-#define SORTING_DUTY_CYCLE 50 //0x38 56 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
+#define SORTING_DUTY_CYCLE 45 //0x38 56 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
 
 // Timer control
 #define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64 -> PWM timer
@@ -205,7 +242,71 @@ void rampdown()
 {
 
 }
+/*
+void stepper_move(uint16_t target_pos)
+{
+	// calculate which way you need to go
+	// CCW -> Positive future steps
+	// CW  -> Negative future steps
 
+    uint16_t CURRENT_DELAY = 20000;
+	int16_t future_steps = target_pos - stepper_pos;
+	if (future_steps > 100)
+		future_steps = - 200 + future_steps;
+	else if (future_steps < -100)
+		future_steps =  200 - abs(future_steps);
+
+    int accel_idx = 0;
+    while (future_steps != 0)
+    {
+        if (abs(future_steps) < DECEL_TABLE_SIZE)
+        {
+            accel_idx = 0;
+            CURRENT_DELAY = DECEL_TABLE[abs(future_steps)];
+        }
+        else
+        {
+            CURRENT_DELAY = ACCEL_TABLE[accel_idx];
+    		if (accel_idx < ACCEL_TABLE_SIZE-1)
+                accel_idx++;
+        }
+
+    	if(future_steps < 0)
+    	{
+    		stepper_table_pos++;
+    		if(stepper_table_pos==4)
+    			stepper_table_pos=0;
+
+    		PORTA = STEPPER_ARRAY[stepper_table_pos];
+
+    		stepper_pos--;
+
+    		if (stepper_pos < 0)
+    			stepper_pos = 199;
+            future_steps++;
+
+    	}	// Counter-Clockwise movement
+    	else if(future_steps > 0)
+    	{
+    		stepper_table_pos--;
+    		if(stepper_table_pos==-1)
+    			stepper_table_pos=3;
+
+    		PORTA = STEPPER_ARRAY[stepper_table_pos];
+
+    		stepper_pos++;
+
+    		if (stepper_pos >= 200)
+    			stepper_pos = 0;
+            future_steps--;
+    	}
+
+        _delay_us(CURRENT_DELAY);
+    }
+
+    _delay_ms(300);
+}
+*/
 // ONLY USE THIS TO CONTROL STEPPER
 void set_stepper_target(int16_t target)
 {
@@ -329,6 +430,15 @@ int main(){
 	state = WAITING_FOR_FIRST;
 
 	zero_tray(); // set initial tray position
+
+/*
+    stepper_move(50);
+    stepper_move(150);
+    stepper_move(50);
+    stepper_move(100);
+    stepper_move(0);
+*/
+
 	set_belt(1); // start DC motor
 
 	// main program loop starts
@@ -612,7 +722,7 @@ ISR(TIMER3_COMPA_vect)
 	// CCW -> Positive future steps
 	// CW  -> Negative future steps
 
-	future_steps = target_position - stepper_pos;
+	int16_t future_steps = target_position - stepper_pos;
 	if (future_steps > 100)
 		future_steps = - 200 + future_steps;
 	else if (future_steps < -100)
@@ -691,8 +801,6 @@ ISR(TIMER3_COMPA_vect)
 ISR_TIMER_RESET:
 	prev_direction = curr_direction;
 	TCNT3 = 0;
-    if (curr_direction == STEPPER_CCW)
-        CURRENT_DELAY += 1000;
     OCR3A = CURRENT_DELAY;
 }
 
