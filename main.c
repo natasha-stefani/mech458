@@ -99,8 +99,8 @@ const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
 volatile int8_t stepper_table_pos;
 volatile int16_t stepper_pos, initial_position, target_position, initial_future_steps;
 //volatile int16_t future_steps = 0;
-#define REVERSAL_DELAY 65000
-#define DROP_STEP 25
+#define REVERSAL_DELAY 55000
+#define DROP_STEP 55
 #define ZEROING_OFFSET 7
 
 // Item categorization
@@ -115,7 +115,7 @@ volatile uint16_t ADC_count;
 volatile uint16_t reflect_min;
 
 // Belt control
-#define SORTING_DUTY_CYCLE 45 //0x38 56 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
+#define SORTING_DUTY_CYCLE 50 //0x38 56 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
 
 // Timer control
 #define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64 -> PWM timer
@@ -718,9 +718,18 @@ ISR(TIMER3_COMPA_vect)
 	static direction_t curr_direction = STOP;
 	static direction_t prev_direction = STOP;
 	static uint16_t CURRENT_DELAY = 20000;
+    static uint8_t reversal_count = 0;
 	// calculate which way you need to go
 	// CCW -> Positive future steps
 	// CW  -> Negative future steps
+
+    if (reversal_count)
+    {
+        reversal_count--;
+        TCNT3 = 0;
+        OCR3A = CURRENT_DELAY;
+        return;
+    }
 
 	int16_t future_steps = target_position - stepper_pos;
 	if (future_steps > 100)
@@ -749,13 +758,17 @@ ISR(TIMER3_COMPA_vect)
         {
     		if (accel_idx < ACCEL_TABLE_SIZE - 1)
                 accel_idx++;
+            if (accel_idx < 0)
+                accel_idx = 0;
             CURRENT_DELAY = ACCEL_TABLE[accel_idx];
         }
 	}
 	else if (prev_direction == STOP) // starting
 	{
     	accel_idx = 0;
-    	CURRENT_DELAY = ACCEL_TABLE[0];
+        reversal_count = 2;
+    	CURRENT_DELAY = REVERSAL_DELAY;
+        goto ISR_TIMER_RESET;
 	}
 	else if (curr_direction == STOP) // stopping
 	{
@@ -766,6 +779,7 @@ ISR(TIMER3_COMPA_vect)
     else // switching directions
     {
         accel_idx = -1;
+        reversal_count = 3;
         CURRENT_DELAY = REVERSAL_DELAY;
         goto ISR_TIMER_RESET;
     }
