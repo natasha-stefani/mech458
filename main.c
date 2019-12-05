@@ -3,10 +3,6 @@
 //				- Sorting correctly, taking shortest path
 //				- Acceleration is added
 
-// Create a watch variable on STATE. To do this right click on the variable STATE and then
-// Add Watch 'STATE'. You can see how the variable changes as you click on PINDA0 or PINDA3. Note that the interrupt
-// catches a rising edge. You modify this to suit your needs.
-
 # define F_CPU 8000000UL // suppress compiler warnings
 
 #include <stdlib.h>
@@ -36,6 +32,74 @@ typedef enum
 
 const uint16_t ACCEL_TABLE[] =
 {
+    // Definitely not perfect, but better.
+ 
+         14000,
+         13701,
+         13415,
+         13141,
+         12878,
+         11820,
+         10924,
+         9194,
+         7937,
+         6982,
+         6233,
+         5629,
+         5376,
+         5146,
+         5095,
+         5045,
+         4996
+    
+   /*
+    // works if we incorrectly sort 4 steel parts, but does skip in the quick turn
+    // video of sorting 16 parts correctly in 12 seconds
+           14000,
+           13701,
+           13415,
+           13141,
+           12878,
+           11820,
+           10924,
+           9241,
+           8008,
+           7065,
+           6320,
+           5718,
+           5458,
+           5220,
+           5168,
+           5116,
+           5066,
+      */
+    
+
+    
+/*
+// Stalling with two batteries, 150ms delay
+        14500,
+        14180,
+        13874,
+        13581,
+        13300,
+        12175,
+        11226,
+        9456,
+        8169,
+        7190,
+        6420,
+        5800,
+        5288,
+        5065,
+        4860,
+        4814,
+        4770,
+        4726
+ */    
+       
+/*
+      //what we have been using, stalling slightly with 2 batteries 250ms delay on turning direction
        14000,
        13680,
        13375,
@@ -56,30 +120,8 @@ const uint16_t ACCEL_TABLE[] =
         4438,
         4405,
         4373
-
-
-/*
-// Best profile so far
-       14000,
-       13680,
-       13375,
-       13084,
-       12197,
-       11423,
-        9859,
-        8671,
-        7739,
-        6988,
-        6370,
-        5852,
-        5412,
-        5033,
-        4897,
-        4767,
-        4729,
-        4692,
-        4656
 */
+        
 };
 
 const uint16_t * DECEL_TABLE = ACCEL_TABLE;
@@ -104,18 +146,16 @@ link * head, * tail, * rtn_link, * unknown_item, * new_link;
 const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
 volatile int8_t stepper_table_pos;
 volatile int16_t stepper_pos, initial_position, target_position, initial_future_steps;
-//volatile int16_t future_steps = 0;
-#define REVERSAL_DELAY 55000
-#define REVERSAL_COUNTDOWN_MS 225
+#define REVERSAL_DELAY 14500
+#define REVERSAL_COUNTDOWN_MS 150
 #define DROP_STEP 55
-//#define ZEROING_OFFSET 12
-#define ZEROING_OFFSET 0
+#define ZEROING_OFFSET 9
 volatile uint16_t CURRENT_DELAY = 14000;
 
 // Item categorization
 #define STEEL_BOUND 200
-#define WHITE_BOUND 700
-#define BLACK_BOUND 911
+#define WHITE_BOUND 800
+#define BLACK_BOUND 953
 
 //Controlling bucket count
 volatile material_t SORTING_type;
@@ -134,7 +174,7 @@ volatile uint16_t ADC_count;
 volatile uint16_t reflect_min;
 
 // Belt control
-#define SORTING_DUTY_CYCLE 63 //0x38 56 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
+#define SORTING_DUTY_CYCLE 80 //0x38 56 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
 
 // Timer control
 #define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64 -> PWM timer
@@ -173,7 +213,6 @@ void start_rampdown_timer()
 }
 
 //--------------------  set_belt  --------------------
-
 inline void set_belt(char is_on)
 {
 	if (is_on)
@@ -183,7 +222,6 @@ inline void set_belt(char is_on)
 }
 
 //--------------------  stepper_movement  --------------------
-
 static inline void stepper_movement (direction_t dir)
 {
 
@@ -205,7 +243,6 @@ static inline void stepper_movement (direction_t dir)
 }
 
 //--------------------  categorize  --------------------
-
 inline material_t categorize(uint16_t reflect_min)
 {
 	if (reflect_min >= BLACK_BOUND)
@@ -229,8 +266,8 @@ inline material_t categorize(uint16_t reflect_min)
 		return ALUM;
 	}
 }
-//--------------------  Adjust bucket  --------------------
 
+//--------------------  Adjust bucket  --------------------
 inline void adjust_bucket()
 {
 	BUCKET_COUNT++;
@@ -252,12 +289,10 @@ inline void adjust_bucket()
 			default:
 				UK_BUCKET_COUNT ++;
 			break;
-				}
-
+		}
 }
 
 //--------------------  lcd_message  --------------------
-
 static inline void lcd_message(const char * msg)
 {
 	LCDClear();
@@ -280,9 +315,9 @@ void zero_tray()
 	
     stepper_pos = 0;
 	LCDClear();
-
-	lcd_message("Waiting ");
-}
+	
+	lcd_message("Waiting..");
+ }
 
 //--------------------     pause    --------------------
 void pause()
@@ -293,45 +328,39 @@ void pause()
     else
         PAUSE_belt = 0;
 
+    // Pause the stepper motor timer
+    TCCR3B &= ~(TIMER3_PRESCALE);
+
 	set_belt(0);
 
     PAUSE_flag = 1;
-
- // Pause the stepper motor timer 
 }
 
 //--------------------   unpause    --------------------
 void unpause()
 {
-
-// reset the acceleration index
+    // reset the acceleration index
     accel_idx = 0;
     CURRENT_DELAY = ACCEL_TABLE[accel_idx];
 
-// unpasue the stepper motor timer
+    // restart stepper motor timer
+    TCCR3B |= TIMER3_PRESCALE;
 
-
-//restore the state of the belt
+    //restore the state of the belt
     if(PAUSE_belt != 0 )
         set_belt(1);
     else
     {
         set_belt(0);
         state = MOVING_ITEM_TO_GATE; 
-     }
+    }
 
-// change the state
+    // change the state
     PAUSE_flag = 0;
-
 }
 
-//--------------------   rampdown   --------------------
 
-void rampdown()
-{
-
-}
-
+//--------------------   Stepper_move   --------------------
 void stepper_move(uint16_t target_pos)
 {
 	// calculate which way you need to go
@@ -396,6 +425,7 @@ void stepper_move(uint16_t target_pos)
     _delay_ms(200);
 }
 
+//--------------------   Set_stepper_target   --------------------
 void set_stepper_target(int16_t target)
 {
 
@@ -417,6 +447,7 @@ void set_stepper_target(int16_t target)
 	}
 }
 
+//--------------------   Set_stepper_target   --------------------
 void wait_for_stepper()
 {
     while(1)
@@ -430,10 +461,10 @@ void wait_for_stepper()
         if (target_position == step_pos)
             break;
     }
-    _delay_ms(500);
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
 }
-//############################## MAIN ##############################
 
+//############################## MAIN ##############################
 int main(){
 
 	cli();	// Disables all interrupts
@@ -454,7 +485,6 @@ int main(){
 	set_belt(0); // disable DC motor
 
 // ----------   CONFIGURING INTERRUPTS    ----------
-
 	// OR / ADC sensor
 	EIMSK |= (_BV(INT0)); // enable INT0
 	EICRA |= (_BV(ISC01) | _BV(ISC00)); // rising edge interrupt
@@ -476,23 +506,13 @@ int main(){
     EIMSK |= (_BV(INT7)); // enable INT7
 	EICRB |= (_BV(ISC71)); // falling edge interrupt
 
-	// Set Interrupt sense control to catch a rising edge
-//	EICRA |= _BV(ISC01) | _BV(ISC00);
-//	EICRA |= _BV(ISC31) | _BV(ISC30);
-
-//	EICRA &= ~_BV(ISC01) & ~_BV(ISC00); /* These lines would undo the above two lines */
-//	EICRA &= ~_BV(ISC31) & ~_BV(ISC30); /* Nice little trick */
-
-	// See page 96 - EIFR External Interrupt Flags...notice how they reset on their own in 'C'...not in assembly
-//	EIMSK |= 0x09;
-
 	// config ADC =========================================================
 	// the ADC input (analog input is set to be ADC1 / PORTF1
 	ADCSRA |= _BV(ADEN); // enable ADC
 	ADCSRA |= _BV(ADIE); // enable interrupt of ADC
 	ADCSRA |= _BV(ADPS2) | _BV(ADPS1); // Enable prescale 64x (8MHz -> 125kHz)
 	//ADCSRA |= _BV(ADPS2) | _BV(ADPS0); // Enable prescale 32x (8MHz -> 250kHz)
-	ADCSRB |= _BV(ADHSM);
+	ADCSRB |= 0x80; // ADHSM flag 
 	ADMUX |= _BV(REFS0);
 	ADMUX |= 0b1;
 
@@ -538,45 +558,8 @@ int main(){
 	state = WAITING_FOR_FIRST;
 
 	zero_tray(); // set initial tray position
-
 /*
-    stepper_move(150);
-    stepper_move(100);
-    stepper_move(50);
-    stepper_move(0);
-    stepper_move(150);
-    stepper_move(100);
-    stepper_move(50);
-    stepper_move(0);
-    stepper_move(150);
-    stepper_move(100);
-    stepper_move(50);
-    stepper_move(0);
-    stepper_move(150);
-    stepper_move(100);
-    stepper_move(50);
-    stepper_move(0);
-
-    stepper_move(50);
-    stepper_move(100);
-    stepper_move(150);
-    stepper_move(0);
-    stepper_move(50);
-    stepper_move(100);
-    stepper_move(150);
-    stepper_move(0);
-    stepper_move(50);
-    stepper_move(100);
-    stepper_move(150);
-    stepper_move(0);
-    stepper_move(50);
-    stepper_move(100);
-    stepper_move(150);
-    stepper_move(0);
-
-
-    while(1);
-
+// For testing motor profile
     _delay_ms(1000);
     set_stepper_target(150);
     wait_for_stepper();
@@ -611,7 +594,7 @@ int main(){
     set_stepper_target(0);
     wait_for_stepper();
     //
-    _delay_ms(1000);
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
     set_stepper_target(50);
     wait_for_stepper();
     set_stepper_target(100);
@@ -647,7 +630,6 @@ int main(){
 
     while(1);
 */
-
 	set_belt(1); // start DC motor
 
 	// main program loop starts
@@ -706,7 +688,6 @@ int main(){
 
                 LCDClear();
 
-
 				state = GATE_CHECK;
 			break;
 
@@ -735,11 +716,10 @@ int main(){
 				{
                     if (BUCKET_COUNT + 1 == GATE_COUNT)
         			{	
-
                         set_belt(1);
                         if (remaining_steps == 0)
                         {
-                            _delay_ms(100);
+                            _delay_ms(200);
                         }
                     }
 
@@ -778,8 +758,8 @@ int main(){
 						LCDWriteIntXY(0,1,rtn_link->e.item_min,4);
 						LCDWriteIntXY(14,0,size(&head,&tail),2);
 						LCDWriteIntXY(6,1,ADC_count,5);
-						_delay_ms(20);
 #endif
+						_delay_ms(20);
 
 						free(rtn_link);
 
@@ -874,48 +854,19 @@ int main(){
             break;
 			default:
 			break;
-
-
-
 		}
-
-
-
-    	
-
 	}
-
-
-
-
-/*
-	RAMP_STAGE:
-		LCDClear();
-		lcd_message("Rampdown!");
-		while(is_paused);
-		LCDClear();
-		_delay_ms(20);
-		STATE = POLLING;
-		goto POLLING_STAGE;
-*/
 	return(0);
-
 }
 
-// the interrupt will be trigured if the ADC is done ========================
-
-
 //-------------------- ADC --------------------
+// Collects ADC conversion result
 ISR(ADC_vect)
 {
-	const uint8_t ADC_low = ADCL;
-	uint16_t ADC_result = 0;
-	ADC_result = ADCH;
-	ADC_result <<= 8;
-	ADC_result |= ADC_low;
+//	ADC();
 
-	if(reflect_min > ADC_result)
-		reflect_min = ADC_result;
+	if(reflect_min > ADC)
+		reflect_min = ADC;
 
 	ADC_count++;
 
@@ -932,7 +883,6 @@ ISR(ADC_vect)
 
 //-------------------- OR --------------------
 // Resets the ADC Count and starts conversion
-
 ISR(INT0_vect)
 {
 	reflect_min = 1023;
@@ -941,8 +891,7 @@ ISR(INT0_vect)
 }
 
 //-------------------- OI --------------------
-// Creating linked list and adding it to que
-
+// Creating linked list and adding it to queue
 ISR(INT1_vect)
 {
  
@@ -971,11 +920,12 @@ ISR(INT2_vect)
 
 //-------------------- PAUSE --------------------
 // Starts or stops the belt
-
 // Will need to also stop to pause the stepper motor as well.
-
 ISR(INT6_vect)
 {
+    //debounce
+    _delay_ms(20);
+    
 	if (PAUSE_flag != 0)
         unpause();
 
@@ -988,16 +938,17 @@ ISR(INT6_vect)
 
 //-------------------- RAMP_DOWN --------------------
 // Finishes what ever items have been added to the belt
-
 ISR(INT7_vect)
 {
+    //debounce
+    _delay_ms(20);
+    
     RAMPDOWN_flag = 1;
     start_rampdown_timer();    
 }
 
 //-------------------- TIMER 3 --------------------
 // Moves one step in the stepper.
-
 ISR(TIMER3_COMPA_vect)
 {
 	static direction_t curr_direction = STOP;
@@ -1039,8 +990,6 @@ ISR(TIMER3_COMPA_vect)
         //restart_countdown(REVERSAL_COUNTDOWN_MS);
     }
 
-   
-
     if (curr_direction == prev_direction) // cruising or stopped
 	{
         if (curr_direction == STOP)
@@ -1048,7 +997,8 @@ ISR(TIMER3_COMPA_vect)
 
         if (abs(future_steps) < DECEL_TABLE_SIZE)
         {
-            CURRENT_DELAY = DECEL_TABLE[abs(future_steps)];
+            if (CURRENT_DELAY < DECEL_TABLE[abs(future_steps)])
+               CURRENT_DELAY = DECEL_TABLE[abs(future_steps)];
         }
         else
         {
@@ -1139,11 +1089,7 @@ ISR(TIMER2_COMPA_vect)
     TCCR2B &= ~(TIMER2_PRESCALE);  //  disable timer
 }
 
-// If an unexpected interrupt occurs (interrupt is enabled and no handler is installed,
-// which usually indicates a bug), then the default action is to reset the device by jumping
-// to the reset vector. You can override this by supplying a function named BADISR_vect which
-// should be defined with ISR() as such. (The name BADISR_vect is actually an alias for __vector_default.
-// The latter must be used inside assembly code in case <avr/interrupt.h> is not included.
+// If an unexpected interrupt occurs
 ISR(BADISR_vect)
 {
     // user code here
