@@ -121,8 +121,8 @@ void dequeue(link **h, link **t, link **deQueuedLink){
 * RETURNS: The element contained within the queue
 */
 /* This simply allows you to peek at the head element of the queue and returns a NULL pointer if empty */
-element firstValue(link **h){
-	return((*h)->e);
+element firstValue(link *h){
+	return(h->e);
 }/*firstValue*/
 
 
@@ -160,9 +160,9 @@ void clearQueue(link **h, link **t){
 * RETURNS: 1:if the queue is empty, and 0:if the queue is NOT empty
 */
 /* Check to see if the queue is empty */
-char isEmpty(link **h){
+char isEmpty(link *h){
 	/* ENTER YOUR CODE HERE */
-	return(*h == NULL);
+	return(h == NULL);
 }/*isEmpty*/
 
 
@@ -175,14 +175,14 @@ char isEmpty(link **h){
 * RETURNS: An integer with the number of links in the queue
 */
 /* returns the size of the queue*/
-int size(link **h, link **t){
+int size(link *h){
 
 	link 	*temp;			/* will store the link while traversing the queue */
 	int 	numElements;
 
 	numElements = 0;
 
-	temp = *h;			/* point to the first item in the list */
+	temp = h;			/* point to the first item in the list */
 
 	while(temp != NULL){
 		numElements++;

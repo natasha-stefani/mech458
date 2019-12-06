@@ -15,7 +15,7 @@
 #include "linked_queue.h"
 #include "defs.h"
 
-//#define LCD_DEBUG // Have LCD show current sorting progress
+#define LCD_DEBUG // Have LCD show current sorting progress
 //#define STEPPER_TEST // Have program test the stepper through a range of motions
 
 typedef enum
@@ -26,7 +26,8 @@ typedef enum
     DROPPING_ITEM,
     PAUSE_STAGE,
     RAMPDOWN,
-    BADISR
+    BADISR,
+    BADITEM
 } state_t;
 
 // Global Variables
@@ -141,7 +142,7 @@ volatile uint8_t RAMPDOWN_flag;
 volatile uint8_t rampdown_time_reached;
 
 // Item queue
-link * head, * tail, * rtn_link, * unknown_item, * new_link;
+link * head, * tail, * unknown_item;
 
 // Stepper motor control
 const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
@@ -154,7 +155,7 @@ volatile uint8_t stepper_pos, target_position;
 volatile uint16_t CURRENT_DELAY = 14000;
 
 // Item categorization
-#define STEEL_BOUND 200
+#define STEEL_BOUND 300
 #define WHITE_BOUND 800
 #define BLACK_BOUND 953
 
@@ -219,9 +220,9 @@ void start_rampdown_timer()
 inline void set_belt(char is_on)
 {
     if (is_on)
-    PORTD = 0b00010000;
+        PORTD = 0b00010000;
     else
-    PORTD = 0;
+        PORTD = 0;
 }
 
 //--------------------  stepper_movement  --------------------
@@ -231,16 +232,16 @@ static inline void stepper_movement (direction_t dir)
     if (dir == STEPPER_CW)
     {
         if(stepper_table_pos==3)
-        stepper_table_pos=0;
+            stepper_table_pos=0;
         else
-        ++stepper_table_pos;
+            ++stepper_table_pos;
     }
     else if (dir == STEPPER_CCW)
     {
         if(stepper_table_pos==0)
-        stepper_table_pos=3;
+            stepper_table_pos=3;
         else
-        --stepper_table_pos;
+            --stepper_table_pos;
     }
     
     PORTA = STEPPER_ARRAY[stepper_table_pos];
@@ -280,19 +281,19 @@ inline void adjust_bucket()
     switch(SORTING_type)
     {
         case (WHITE):
-        ++WHITE_BUCKET_COUNT;
+            ++WHITE_BUCKET_COUNT;
         break;
         case (BLACK):
-        ++BLK_BUCKET_COUNT;
+            ++BLK_BUCKET_COUNT;
         break;
         case (STEEL):
-        ++STEEL_BUCKET_COUNT;
+            ++STEEL_BUCKET_COUNT;
         break;
         case (ALUM):
-        ++ALUM_BUCKET_COUNT;
+            ++ALUM_BUCKET_COUNT;
         break;
         default:
-        ++UK_BUCKET_COUNT;
+            ++UK_BUCKET_COUNT;
         break;
     }
 }
@@ -314,9 +315,7 @@ void zero_tray()
     stepper_movement(STEPPER_CW);
 
     for (int i = 0; i < ZEROING_OFFSET; i++)
-    {
         stepper_movement(STEPPER_CCW);
-    }
     
     stepper_pos = 0;
     LCDClear();
@@ -329,9 +328,9 @@ void pause()
 {
     //store state of the belt
     if(PIND)
-    PAUSE_belt = 1;
+        PAUSE_belt = 1;
     else
-    PAUSE_belt = 0;
+        PAUSE_belt = 0;
 
     // Pause the stepper motor timer
     TCCR3B &= ~(TIMER3_PRESCALE);
@@ -353,11 +352,11 @@ void unpause()
 
     //restore the state of the belt
     if(PAUSE_belt != 0 )
-    set_belt(1);
+        set_belt(1);
     else
     {
         set_belt(0);
-        state = MOVING_ITEM_TO_GATE;
+        state = MOVING_ITEM_TO_GATE; // Is this correct? What if we weren't in this state before pausing???
     }
 
     // change the state
@@ -375,9 +374,9 @@ void stepper_move(uint8_t target_pos)
     uint16_t CURRENT_DELAY = 20000;
     int16_t future_steps = target_pos - stepper_pos;
     if (future_steps > 100)
-    future_steps = - 200 + future_steps;
+        future_steps = - 200 + future_steps;
     else if (future_steps < -100)
-    future_steps =  200 - abs(future_steps);
+        future_steps =  200 - abs(future_steps);
 
     int accel_idx = 0;
     while (future_steps != 0)
@@ -391,37 +390,37 @@ void stepper_move(uint8_t target_pos)
         {
             CURRENT_DELAY = ACCEL_TABLE[accel_idx];
             if (accel_idx < ACCEL_TABLE_SIZE-1)
-            ++accel_idx;
+                ++accel_idx;
         }
 
         if(future_steps < 0)
         {
             if(stepper_table_pos==3)
-            stepper_table_pos=0;
+                stepper_table_pos=0;
             else
-            ++stepper_table_pos;
+                ++stepper_table_pos;
 
             PORTA = STEPPER_ARRAY[stepper_table_pos];
 
             if (stepper_pos == 0)
-            stepper_pos = 199;
+                stepper_pos = 199;
             else
-            --stepper_pos;
+                --stepper_pos;
 
         }	// Counter-Clockwise movement
         else if(future_steps > 0)
         {
             if(stepper_table_pos==0)
-            stepper_table_pos=3;
+                stepper_table_pos=3;
             else
-            --stepper_table_pos;
+                --stepper_table_pos;
 
             PORTA = STEPPER_ARRAY[stepper_table_pos];
 
             if (stepper_pos == 199)
-            stepper_pos = 0;
+                stepper_pos = 0;
             else
-            ++stepper_pos;
+                ++stepper_pos;
         }
 
         _delay_us(CURRENT_DELAY);
@@ -429,6 +428,16 @@ void stepper_move(uint8_t target_pos)
 
     _delay_ms(200);
 }
+
+#ifdef STEPPER_TEST
+void wait_for_stepper()
+{
+    while(target_position != stepper_pos)
+        _delay_ms(1);
+
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+}
+#endif
 
 //--------------------   Set_stepper_target   --------------------
 inline void set_stepper_target(uint8_t target)
@@ -520,6 +529,7 @@ int main(){
 
     // init linked queue
     setup(&head,&tail);
+    link * new_link;
     initLink(&new_link);
     new_link->e.item_type = DUMMY;
     new_link->e.item_min = 123;
@@ -532,6 +542,7 @@ int main(){
     zero_tray(); // set initial tray position
 
     #ifdef STEPPER_TEST
+    lcd_message("Step test..");
     _delay_ms(1000);
     set_stepper_target(150);
     wait_for_stepper();
@@ -601,6 +612,7 @@ int main(){
     set_stepper_target(0);
     wait_for_stepper();
 
+    lcd_message("Step test done");
     while(1);
     #endif
 
@@ -614,7 +626,7 @@ int main(){
             EICRA &= ~_BV(ISC01) | ~_BV(ISC00); // disable OR interrupt
 
             if (head == tail)
-            state = RAMPDOWN;
+                state = RAMPDOWN;
         }
 
         _delay_ms(1);
@@ -627,41 +639,49 @@ int main(){
 
             case MOVING_ITEM_TO_GATE:;
 
-            element head_item;
+            material_t future_item_type;
             ATOMIC_BLOCK(ATOMIC_FORCEON)
             {
-                head_item = head->e;
+                future_item_type = head->e.item_type;
             }
-
-            const material_t future_item_type = head_item.item_type;
             
             SORTING_type = future_item_type;
 
-            uint8_t future_target_position;
+            uint8_t future_target_position = stepper_pos;
+            state = GATE_CHECK;
             switch(future_item_type)
             {
                 case (WHITE):
-                future_target_position = 100;
+                    future_target_position = 100;
                 break;
                 case (BLACK):
-                future_target_position = 0;
+                    future_target_position = 0;
                 break;
                 case (STEEL):
-                future_target_position = 50;
+                    future_target_position = 50;
                 break;
                 case (ALUM):
-                future_target_position = 150;
+                    future_target_position = 150;
+                break;              
+                case (UNKNOWN):
+                    LCDClear();
+                    LCDWriteString("UNKNOWN");
+                    state = BADITEM;
+                break;
+                case (DUMMY):
+                    LCDClear();
+                    LCDWriteString("DUMMY");
+                    state = BADITEM;
                 break;
                 default:
-                future_target_position = stepper_pos;
+                    LCDClear();
+                    LCDWriteString("GARBAGE");
+                    state = BADITEM;
                 break;
             }
 
             set_stepper_target(future_target_position);
 
-            LCDClear();
-
-            state = GATE_CHECK;
             break;
 
             case GATE_CHECK:;
@@ -671,9 +691,9 @@ int main(){
                 remaining_steps = target_position - stepper_pos;
             }
             if (remaining_steps > 100)
-            remaining_steps = - 200 + remaining_steps;
+                remaining_steps = - 200 + remaining_steps;
             else if (remaining_steps < -100)
-            remaining_steps =  200 - abs(remaining_steps);
+                remaining_steps =  200 - abs(remaining_steps);
 
             if (abs(remaining_steps) > DROP_STEP)
             {
@@ -707,6 +727,7 @@ int main(){
                 {
                     adjust_bucket();
                     
+                    link * rtn_link;
                     ATOMIC_BLOCK(ATOMIC_FORCEON)
                     {
                         dequeue(&head,&tail,&rtn_link);
@@ -736,7 +757,7 @@ int main(){
                         break;
                     }
                     LCDWriteIntXY(0,1,rtn_link->e.item_min,4);
-                    LCDWriteIntXY(14,0,size(&head,&tail),2);
+                    LCDWriteIntXY(14,0,size(head),2);
                     LCDWriteIntXY(6,1,ADC_count,5);
                     _delay_ms(20);
                     #endif
@@ -749,7 +770,7 @@ int main(){
                         head_type = head->e.item_type;
                     }
 
-                    if (head_type != DUMMY && head_type != UNKNOWN)
+                    if (head_type == ALUM || head_type == STEEL || head_type == WHITE || head_type == BLACK)
                     {
                         // is real item at head
                         if(CURR_BUCKET_COUNT == CURR_GATE_COUNT){
@@ -769,9 +790,17 @@ int main(){
             case BADISR:
 
             set_belt(0);
-            lcd_message("Congrats, u suck");
+            lcd_message("--Bad ISR--");
             cli();
+            while (1);
 
+            break;
+
+            case BADITEM:
+
+            set_belt(0);
+            LCDWriteStringXY(0,1,"--Bad item--");
+            cli();
             while (1);
 
             break;
@@ -843,17 +872,15 @@ int main(){
 // Collects ADC conversion result
 ISR(ADC_vect)
 {
-    //	ADC();
-
     if(reflect_min > ADC)
-    reflect_min = ADC;
+        reflect_min = ADC;
 
     #ifdef LCD_DEBUG
     ++ADC_count;
     #endif
 
     if ((PIND & 0x01) > 0)
-    ADCSRA |= _BV(ADSC);
+        ADCSRA |= _BV(ADSC);
     else
     {
         // classify unknown piece
@@ -882,8 +909,9 @@ ISR(INT1_vect)
 {
     
     if(head == tail)
-    unknown_item->e.item_type = DUMMY;
+        unknown_item->e.item_type = DUMMY;
 
+    link * new_link;
     initLink(&new_link);
     new_link->e.item_type = UNKNOWN;
 
@@ -897,9 +925,9 @@ ISR(INT2_vect)
     set_belt(0);
 
     if(BUCKET_COUNT == GATE_COUNT)
-    state = MOVING_ITEM_TO_GATE;
+        state = MOVING_ITEM_TO_GATE;
     else
-    state = GATE_CHECK;
+        state = GATE_CHECK;
 
     ++GATE_COUNT;
 }
@@ -913,10 +941,9 @@ ISR(INT6_vect)
     _delay_ms(20);
     
     if (PAUSE_flag != 0)
-    unpause();
-
+        unpause();
     else
-    pause();
+        pause();
     
     state = PAUSE_STAGE;
 }
@@ -943,7 +970,6 @@ ISR(TIMER3_COMPA_vect)
     // CW  -> Negative future steps
 
     // checking for the timer to be complete between switching directions
-
     static uint8_t stop_switch_flag = 0;
     if(stop_switch_flag)
     {
@@ -953,21 +979,21 @@ ISR(TIMER3_COMPA_vect)
             stop_switch_flag = 0;
         }
         else
-        return;
+            return;
     }
 
     // Determining future steps
     int16_t future_steps = target_position - stepper_pos;
     if (future_steps > 100)
-    future_steps = - 200 + future_steps;
+        future_steps = - 200 + future_steps;
     else if (future_steps < -100)
-    future_steps =  200 - abs(future_steps);
+        future_steps =  200 - abs(future_steps);
 
     // Determining direction based on future steps
     if (future_steps < 0)
-    curr_direction = STEPPER_CW;
+        curr_direction = STEPPER_CW;
     else if (future_steps > 0)
-    curr_direction = STEPPER_CCW;
+        curr_direction = STEPPER_CCW;
     else // stopping
     {
         curr_direction = STOP;
@@ -978,19 +1004,19 @@ ISR(TIMER3_COMPA_vect)
     if (curr_direction == prev_direction) // cruising or stopped
     {
         if (curr_direction == STOP)
-        goto ISR_TIMER_RESET;
+            goto ISR_TIMER_RESET;
 
         if (abs(future_steps) < DECEL_TABLE_SIZE)
         {
             if (CURRENT_DELAY < DECEL_TABLE[abs(future_steps)])
-            CURRENT_DELAY = DECEL_TABLE[abs(future_steps)];
+                CURRENT_DELAY = DECEL_TABLE[abs(future_steps)];
         }
         else
         {
             if (accel_idx < ACCEL_TABLE_SIZE - 1)
-            ++accel_idx;
+                ++accel_idx;
             if (accel_idx < 0)
-            accel_idx = 0;
+                accel_idx = 0;
             CURRENT_DELAY = ACCEL_TABLE[accel_idx];
         }
     }
@@ -1019,31 +1045,31 @@ ISR(TIMER3_COMPA_vect)
     if(future_steps < 0)
     {
         if(stepper_table_pos==3)
-        stepper_table_pos=0;
+            stepper_table_pos=0;
         else
-        ++stepper_table_pos;
+            ++stepper_table_pos;
 
         PORTA = STEPPER_ARRAY[stepper_table_pos];
 
         if (stepper_pos == 0)
-        stepper_pos = 199;
+            stepper_pos = 199;
         else
-        --stepper_pos;
+            --stepper_pos;
 
     }	// Counter-Clockwise movement
     else if(future_steps > 0)
     {
         if(stepper_table_pos==0)
-        stepper_table_pos=3;
+            stepper_table_pos=3;
         else
-        --stepper_table_pos;
+            --stepper_table_pos;
 
         PORTA = STEPPER_ARRAY[stepper_table_pos];
 
         if (stepper_pos == 199)
-        stepper_pos = 0;
+            stepper_pos = 0;
         else
-        ++stepper_pos;
+            ++stepper_pos;
     }
 
     ISR_TIMER_RESET:
@@ -1068,9 +1094,9 @@ ISR(TIMER2_COMPA_vect)
 
     ++ramp_timer_count;
     if (ramp_timer_count == 60)
-    EICRA &= ~_BV(ISC11); // disable OI interrupt
+        EICRA &= ~_BV(ISC11); // disable OI interrupt
     if (ramp_timer_count < 75)
-    return;
+        return;
 
     rampdown_time_reached = 1;
     TCCR2B &= ~(TIMER2_PRESCALE);  //  disable timer
