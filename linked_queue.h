@@ -4,14 +4,14 @@
 
 /* Type definitions */
 typedef struct {
-	material_t item_type; 	/* stores a number describing the element */
-	uint16_t item_min;
-	// add more item variables here
+    material_t item_type; 	/* stores a number describing the element */
+    uint16_t item_min;
+    // add more item variables here
 } element;
 
 typedef struct link{
-	element		e;	
-	struct link *next;
+    element		e;
+    struct link *next;
 } link;
 
 void	initLink	(link **newLink);
