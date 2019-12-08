@@ -15,7 +15,7 @@
 #include "linked_queue.h"
 #include "defs.h"
 
-#define LCD_DEBUG // Have LCD show current sorting progress
+//#define LCD_DEBUG // Have LCD show current sorting progress
 //#define STEPPER_TEST // Have program test the stepper through a range of motions
 
 typedef enum
@@ -137,9 +137,9 @@ volatile state_t state;
 volatile uint8_t BUCKET_COUNT;
 volatile uint8_t GATE_COUNT;
 volatile uint8_t PAUSE_flag;
-volatile uint8_t PAUSE_belt;
 volatile uint8_t RAMPDOWN_flag;
 volatile uint8_t rampdown_time_reached;
+#define DEBOUNCE_DELAY_MS 50
 
 // Item queue
 link * head, * tail, * unknown_item;
@@ -155,9 +155,9 @@ volatile uint8_t stepper_pos, target_position;
 volatile uint16_t CURRENT_DELAY = 14000;
 
 // Item categorization
-#define STEEL_BOUND 300
+#define STEEL_BOUND 350
 #define WHITE_BOUND 800
-#define BLACK_BOUND 953
+#define BLACK_BOUND 965
 
 //Controlling bucket count
 volatile material_t SORTING_type;
@@ -322,47 +322,6 @@ void zero_tray()
     
     lcd_message("Waiting..");
 }
-
-//--------------------     pause    --------------------
-void pause()
-{
-    //store state of the belt
-    if(PIND)
-        PAUSE_belt = 1;
-    else
-        PAUSE_belt = 0;
-
-    // Pause the stepper motor timer
-    TCCR3B &= ~(TIMER3_PRESCALE);
-
-    set_belt(0);
-
-    PAUSE_flag = 1;
-}
-
-//--------------------   unpause    --------------------
-void unpause()
-{
-    // reset the acceleration index
-    accel_idx = 0;
-    CURRENT_DELAY = ACCEL_TABLE[accel_idx];
-
-    // restart stepper motor timer
-    TCCR3B |= TIMER3_PRESCALE;
-
-    //restore the state of the belt
-    if(PAUSE_belt != 0 )
-        set_belt(1);
-    else
-    {
-        set_belt(0);
-        state = MOVING_ITEM_TO_GATE; // Is this correct? What if we weren't in this state before pausing???
-    }
-
-    // change the state
-    PAUSE_flag = 0;
-}
-
 
 //--------------------   Stepper_move   --------------------
 void stepper_move(uint8_t target_pos)
@@ -648,7 +607,6 @@ int main(){
             SORTING_type = future_item_type;
 
             uint8_t future_target_position = stepper_pos;
-            state = GATE_CHECK;
             switch(future_item_type)
             {
                 case (WHITE):
@@ -681,6 +639,7 @@ int main(){
             }
 
             set_stepper_target(future_target_position);
+            state = GATE_CHECK;
 
             break;
 
@@ -707,19 +666,12 @@ int main(){
             }
             else
             {
-                uint8_t CURR_BUCKET_COUNT, CURR_GATE_COUNT;
-                ATOMIC_BLOCK(ATOMIC_FORCEON)
-                {
-                    CURR_BUCKET_COUNT = BUCKET_COUNT;
-                    CURR_GATE_COUNT = GATE_COUNT;
-                }
-                
-                if (CURR_BUCKET_COUNT + 1 == CURR_GATE_COUNT)
+                if (BUCKET_COUNT + 1 == GATE_COUNT)
                 {
                     set_belt(1);
                     if (remaining_steps == 0)
                     {
-                        _delay_ms(200);
+                        _delay_ms(140);
                     }
                 }
 
@@ -773,12 +725,12 @@ int main(){
                     if (head_type == ALUM || head_type == STEEL || head_type == WHITE || head_type == BLACK)
                     {
                         // is real item at head
-                        if(CURR_BUCKET_COUNT == CURR_GATE_COUNT){
+                        if(BUCKET_COUNT == GATE_COUNT){
                             set_belt(1);
                             state = WAITING_FOR_FIRST;
                         }
                         else
-                        state = MOVING_ITEM_TO_GATE;
+                            state = MOVING_ITEM_TO_GATE;
                     }
                     else
                     {
@@ -938,14 +890,42 @@ ISR(INT2_vect)
 ISR(INT6_vect)
 {
     //debounce
-    _delay_ms(20);
     
-    if (PAUSE_flag != 0)
-        unpause();
+    static state_t old_state;
+    static uint8_t PAUSE_belt;
+    
+    if (PAUSE_flag == 0)
+    {
+        set_belt(0);
+        _delay_ms(DEBOUNCE_DELAY_MS);
+        PAUSE_flag = 1;       
+        old_state = state;
+        state = PAUSE_STAGE;
+        
+        //store state of the belt
+        if(PIND)
+            PAUSE_belt = 1;
+        else
+            PAUSE_belt = 0;
+    }        
     else
-        pause();
-    
-    state = PAUSE_STAGE;
+    {
+        // reset the acceleration index
+        accel_idx = 0;
+        CURRENT_DELAY = ACCEL_TABLE[accel_idx];
+
+        _delay_ms(DEBOUNCE_DELAY_MS);
+        //restore the state of the belt
+        if(PAUSE_belt != 0 )
+            set_belt(1);
+        else
+            set_belt(0);
+            
+        // change the state
+        PAUSE_flag = 0;     
+        
+        state = old_state;   
+    } 
 }
 
 //-------------------- RAMP_DOWN --------------------
@@ -953,7 +933,7 @@ ISR(INT6_vect)
 ISR(INT7_vect)
 {
     //debounce
-    _delay_ms(20);
+    _delay_ms(DEBOUNCE_DELAY_MS);
     
     RAMPDOWN_flag = 1;
     start_rampdown_timer();
