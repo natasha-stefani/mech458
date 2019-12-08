@@ -607,6 +607,7 @@ int main(){
             SORTING_type = future_item_type;
 
             uint8_t future_target_position = stepper_pos;
+            state = GATE_CHECK;
             switch(future_item_type)
             {
                 case (WHITE):
@@ -639,7 +640,6 @@ int main(){
             }
 
             set_stepper_target(future_target_position);
-            state = GATE_CHECK;
 
             break;
 
