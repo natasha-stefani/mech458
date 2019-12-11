@@ -149,15 +149,15 @@ const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
 volatile int8_t stepper_table_pos;
 volatile uint8_t stepper_pos, target_position;
 #define REVERSAL_DELAY 14500
-#define REVERSAL_COUNTDOWN_MS 150
+#define REVERSAL_COUNTDOWN_MS 60 //150
 #define DROP_STEP 55
 #define ZEROING_OFFSET 9
 volatile uint16_t CURRENT_DELAY = 14000;
 
 // Item categorization
-#define STEEL_BOUND 350
+#define STEEL_BOUND 300
 #define WHITE_BOUND 800
-#define BLACK_BOUND 965
+#define BLACK_BOUND 968
 
 //Controlling bucket count
 volatile material_t SORTING_type;
@@ -503,8 +503,41 @@ int main(){
     #ifdef STEPPER_TEST
     lcd_message("Step test..");
     _delay_ms(1000);
+    
+    lcd_message("Back and forth");
+    
     set_stepper_target(150);
     wait_for_stepper();
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+    set_stepper_target(0);
+    wait_for_stepper();
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+
+    set_stepper_target(150);
+     wait_for_stepper();
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+
+    set_stepper_target(0);
+     wait_for_stepper();
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+    set_stepper_target(150);
+    wait_for_stepper();
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+     set_stepper_target(0);
+    wait_for_stepper();
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+    set_stepper_target(150);
+     wait_for_stepper();
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+    set_stepper_target(0);
+     wait_for_stepper();
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+
+    set_stepper_target(150);
+     wait_for_stepper();  
+    _delay_ms(REVERSAL_COUNTDOWN_MS);
+
+
     set_stepper_target(100);
     wait_for_stepper();
     set_stepper_target(50);
@@ -751,8 +784,8 @@ int main(){
             case BADITEM:
 
             set_belt(0);
-            LCDWriteStringXY(0,1,"--Bad item--");
-            cli();
+            LCDWriteStringXY(0,1,"--Bad item--");.
+            
             while (1);
 
             break;
