@@ -440,7 +440,7 @@ int main(){
 
     // Pause button
     EIMSK |= (_BV(INT6)); // enable INT6
-    EICRB |= (_BV(ISC61)); // falling edge interrupt
+    EICRB |= (_BV(ISC61) | _BV(ISC60)); // rising edge interrupt
 
     // Ramp-down button
     EIMSK |= (_BV(INT7)); // enable INT7
@@ -784,7 +784,7 @@ int main(){
             case BADITEM:
 
             set_belt(0);
-            LCDWriteStringXY(0,1,"--Bad item--");.
+            LCDWriteStringXY(0,1,"--Bad item--");
             
             while (1);
 
