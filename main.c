@@ -1001,12 +1001,21 @@ ISR(TIMER3_COMPA_vect)
         future_steps = - 200 + future_steps;
     else if (future_steps < -100)
         future_steps =  200 - abs(future_steps);
+    
+    if (future_steps == 100 && prev_direction == STEPPER_CW)
+        future_steps = -100;
+    else if (future_steps == -100 && prev_direction == STEPPER_CCW)
+        future_steps = 100;
 
     // Determining direction based on future steps
     if (future_steps < 0)
+    {
         curr_direction = STEPPER_CW;
+    }        
     else if (future_steps > 0)
+    {
         curr_direction = STEPPER_CCW;
+    }        
     else // stopping
     {
         curr_direction = STOP;
