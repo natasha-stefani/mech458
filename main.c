@@ -178,9 +178,9 @@ volatile uint8_t stepper_pos, target_position;
 volatile uint16_t CURRENT_DELAY = 14000;
 
 // Item categorization
-#define STEEL_BOUND 300
+#define STEEL_BOUND 350
 #define WHITE_BOUND 800
-#define BLACK_BOUND 968
+#define BLACK_BOUND 969
 
 //Controlling bucket count
 volatile material_t SORTING_type;
@@ -715,7 +715,7 @@ int main(){
                 set_belt(0);
                 break;
             }
-            else if (CURRENT_DELAY > ACCEL_TABLE[5] && abs(remaining_steps) != 0)
+            else if (CURRENT_DELAY > ACCEL_TABLE[2] && abs(remaining_steps) != 0)
             {
                 set_belt(0);
                 break;
@@ -727,7 +727,7 @@ int main(){
                     set_belt(1);
                     if (remaining_steps == 0)
                     {
-                        _delay_ms(140);
+                        _delay_ms(150);
                     }
                 }
 
@@ -809,7 +809,7 @@ int main(){
             set_belt(0);
             LCDWriteStringXY(0,1,"--Bad item--");
             
-            while (1);
+//            while (1);
 
             break;
 
