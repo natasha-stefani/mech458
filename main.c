@@ -34,6 +34,30 @@ typedef enum
 
 const uint16_t ACCEL_TABLE[] =
 {
+
+    // current candidate
+       14000,
+       13680,
+       13375,
+       13084,
+       12197,
+       11423,
+       9699,
+       8428,
+       7451,
+       6677,
+       6048,
+       5528,
+       5363,
+       5208,
+       5163,
+       5119,
+       5076,
+       5033,
+       4992,
+       4950,
+       4910
+/*    
     // Definitely not perfect, but better.
     
     14000,
@@ -54,7 +78,6 @@ const uint16_t ACCEL_TABLE[] =
     5045,
     4996
     
-    /*
     // works if we incorrectly sort 4 steel parts, but does skip in the quick turn
     // video of sorting 16 parts correctly in 12 seconds
     14000,
@@ -74,11 +97,11 @@ const uint16_t ACCEL_TABLE[] =
     5168,
     5116,
     5066,
-    */
+    
     
 
     
-    /*
+    
     // Stalling with two batteries, 150ms delay
     14500,
     14180,
@@ -95,12 +118,12 @@ const uint16_t ACCEL_TABLE[] =
     5288,
     5065,
     4860,
-    4814,
-    4770,
-    4726
-    */
+    4814
+//    4770,
+//    4726
     
-    /*
+    
+    
     //what we have been using, stalling slightly with 2 batteries 250ms delay on turning direction
     14000,
     13680,
@@ -149,7 +172,7 @@ const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
 volatile int8_t stepper_table_pos;
 volatile uint8_t stepper_pos, target_position;
 #define REVERSAL_DELAY 14500
-#define REVERSAL_COUNTDOWN_MS 60 //150
+#define REVERSAL_COUNTDOWN_MS 60 // was 75
 #define DROP_STEP 55
 #define ZEROING_OFFSET 9
 volatile uint16_t CURRENT_DELAY = 14000;
@@ -812,10 +835,10 @@ int main(){
             LCDWriteIntXY(14,0,ALUM_BUCKET_COUNT,2);
 
             // what is on the belt
-            LCDWriteIntXY(2,1,blk_belt,2);
-            LCDWriteIntXY(6,1,white_belt,2);
-            LCDWriteIntXY(10,1,steel_belt,2);
-            LCDWriteIntXY(14,1,alum_belt,2);
+            LCDWriteIntXY(1,1,blk_belt,3);
+            LCDWriteIntXY(5,1,white_belt,3);
+            LCDWriteIntXY(9,1,steel_belt,3);
+            LCDWriteIntXY(13,1,alum_belt,3);
 
             _delay_ms(500);
 
