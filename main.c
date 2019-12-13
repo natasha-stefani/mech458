@@ -173,7 +173,10 @@ volatile int8_t stepper_table_pos;
 volatile uint8_t stepper_pos, target_position;
 #define REVERSAL_DELAY 14500
 #define REVERSAL_COUNTDOWN_MS 60 // was 75
-#define DROP_STEP 55
+#define METAL_DROP_STEP 55
+#define PLASTIC_DROP_STEP 58
+#define METAL_IDX 2
+#define PLASTIC_IDX 0
 #define ZEROING_OFFSET 9
 volatile uint16_t CURRENT_DELAY = 14000;
 
@@ -183,12 +186,12 @@ volatile uint16_t CURRENT_DELAY = 14000;
 #define BLACK_BOUND 969
 
 //Controlling bucket count
-volatile material_t SORTING_type;
-volatile uint8_t BLK_BUCKET_COUNT;
-volatile uint8_t WHITE_BUCKET_COUNT;
-volatile uint8_t STEEL_BUCKET_COUNT;
-volatile uint8_t ALUM_BUCKET_COUNT;
-volatile uint8_t UK_BUCKET_COUNT;
+material_t SORTING_type;
+uint8_t BLK_BUCKET_COUNT;
+uint8_t WHITE_BUCKET_COUNT;
+uint8_t STEEL_BUCKET_COUNT;
+uint8_t ALUM_BUCKET_COUNT;
+uint8_t UK_BUCKET_COUNT;
 
 volatile uint8_t BLK_COUNT;
 volatile uint8_t WHITE_COUNT;
@@ -633,6 +636,8 @@ int main(){
 
     set_belt(1); // start DC motor
 
+    uint8_t drop_step = 0, drop_idx = 0;
+
     // main program loop starts
     while(1)
     {
@@ -668,15 +673,23 @@ int main(){
             {
                 case (WHITE):
                     future_target_position = 100;
+                    drop_step = PLASTIC_DROP_STEP;
+                    drop_idx = PLASTIC_IDX;
                 break;
                 case (BLACK):
                     future_target_position = 0;
+                    drop_step = PLASTIC_DROP_STEP;
+                    drop_idx = PLASTIC_IDX;
                 break;
                 case (STEEL):
                     future_target_position = 50;
+                    drop_step = METAL_DROP_STEP;
+                    drop_idx = METAL_IDX;
                 break;
                 case (ALUM):
                     future_target_position = 150;
+                    drop_step = METAL_DROP_STEP;
+                    drop_idx = METAL_IDX;
                 break;              
                 case (UNKNOWN):
                     LCDClear();
@@ -710,12 +723,12 @@ int main(){
             else if (remaining_steps < -100)
                 remaining_steps =  200 - abs(remaining_steps);
 
-            if (abs(remaining_steps) > DROP_STEP)
+            if (abs(remaining_steps) > drop_step)
             {
                 set_belt(0);
                 break;
             }
-            else if (CURRENT_DELAY > ACCEL_TABLE[2] && abs(remaining_steps) != 0)
+            else if (CURRENT_DELAY > ACCEL_TABLE[drop_idx] && abs(remaining_steps) != 0)
             {
                 set_belt(0);
                 break;
