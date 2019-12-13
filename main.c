@@ -117,8 +117,8 @@ volatile uint16_t reflect_min;
 #define TIMER3_PRESCALE _BV (CS31)  //  Prescale /8 -> Stepper timer
 volatile uint8_t countdown_reached = 1;
 
-// timer 1 countdown
-// input value must be less than ~2100ms
+// timer 1 millisecond countdown
+// input value must be less than 2100
 void restart_countdown(uint16_t ms)
 {
     /* Initialize Timer 1 to zero */
@@ -552,8 +552,6 @@ int main(){
             set_belt(0);
             LCDWriteStringXY(0,1,"--Bad item--");
             
-//            while (1);
-
             break;
 
             case PAUSE_STAGE:;
@@ -688,8 +686,6 @@ ISR(INT2_vect)
 // Will need to also stop to pause the stepper motor as well.
 ISR(INT6_vect)
 {
-    //debounce
-    
     static state_t old_state;
     static uint8_t PAUSE_belt;
     
@@ -722,7 +718,6 @@ ISR(INT6_vect)
             
         // change the state
         PAUSE_flag = 0;     
-        
         state = old_state;   
     } 
 }
@@ -785,8 +780,6 @@ ISR(TIMER3_COMPA_vect)
     else // stopping
     {
         curr_direction = STOP;
-        //stop_switch_flag = 1;
-        //restart_countdown(REVERSAL_COUNTDOWN_MS);
     }
 
     if (curr_direction == prev_direction) // cruising or stopped
