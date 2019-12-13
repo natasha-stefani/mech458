@@ -19,7 +19,6 @@ typedef enum
     WAITING_FOR_FIRST,
     MOVING_ITEM_TO_GATE,
     GATE_CHECK,
-    DROPPING_ITEM,
     PAUSE_STAGE,
     RAMPDOWN,
     BADISR,
