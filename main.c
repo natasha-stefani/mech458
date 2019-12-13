@@ -1,7 +1,4 @@
-// Status: A-syncronous stepper motor contol
-// 				- Multiple loading
-//				- Sorting correctly, taking shortest path
-//				- Acceleration is added
+// Status: Final demo candidate
 
 # define F_CPU 8000000UL // suppress compiler warnings
 
@@ -16,7 +13,6 @@
 #include "defs.h"
 
 //#define LCD_DEBUG // Have LCD show current sorting progress
-//#define STEPPER_TEST // Have program test the stepper through a range of motions
 
 typedef enum
 {
@@ -32,10 +28,9 @@ typedef enum
 
 // Global Variables
 
+// Stepper motor acceleration profile
 const uint16_t ACCEL_TABLE[] =
 {
-
-    // current candidate
        14000,
        13680,
        13375,
@@ -57,96 +52,6 @@ const uint16_t ACCEL_TABLE[] =
        4992,
        4950,
        4910
-/*    
-    // Definitely not perfect, but better.
-    
-    14000,
-    13701,
-    13415,
-    13141,
-    12878,
-    11820,
-    10924,
-    9194,
-    7937,
-    6982,
-    6233,
-    5629,
-    5376,
-    5146,
-    5095,
-    5045,
-    4996
-    
-    // works if we incorrectly sort 4 steel parts, but does skip in the quick turn
-    // video of sorting 16 parts correctly in 12 seconds
-    14000,
-    13701,
-    13415,
-    13141,
-    12878,
-    11820,
-    10924,
-    9241,
-    8008,
-    7065,
-    6320,
-    5718,
-    5458,
-    5220,
-    5168,
-    5116,
-    5066,
-    
-    
-
-    
-    
-    // Stalling with two batteries, 150ms delay
-    14500,
-    14180,
-    13874,
-    13581,
-    13300,
-    12175,
-    11226,
-    9456,
-    8169,
-    7190,
-    6420,
-    5800,
-    5288,
-    5065,
-    4860,
-    4814
-//    4770,
-//    4726
-    
-    
-    
-    //what we have been using, stalling slightly with 2 batteries 250ms delay on turning direction
-    14000,
-    13680,
-    13375,
-    13084,
-    12197,
-    11423,
-    9859,
-    8671,
-    7739,
-    6988,
-    6370,
-    5852,
-    5412,
-    5033,
-    4705,
-    4585,
-    4471,
-    4438,
-    4405,
-    4373
-    */
-    
 };
 
 const uint16_t * DECEL_TABLE = ACCEL_TABLE;
@@ -349,71 +254,6 @@ void zero_tray()
     lcd_message("Waiting..");
 }
 
-//--------------------   Stepper_move   --------------------
-void stepper_move(uint8_t target_pos)
-{
-    // calculate which way you need to go
-    // CCW -> Positive future steps
-    // CW  -> Negative future steps
-
-    uint16_t CURRENT_DELAY = 20000;
-    int16_t future_steps = target_pos - stepper_pos;
-    if (future_steps > 100)
-        future_steps = - 200 + future_steps;
-    else if (future_steps < -100)
-        future_steps =  200 - abs(future_steps);
-
-    int accel_idx = 0;
-    while (future_steps != 0)
-    {
-        if (abs(future_steps) < DECEL_TABLE_SIZE)
-        {
-            accel_idx = 0;
-            CURRENT_DELAY = DECEL_TABLE[abs(future_steps)];
-        }
-        else
-        {
-            CURRENT_DELAY = ACCEL_TABLE[accel_idx];
-            if (accel_idx < ACCEL_TABLE_SIZE-1)
-                ++accel_idx;
-        }
-
-        if(future_steps < 0)
-        {
-            if(stepper_table_pos==3)
-                stepper_table_pos=0;
-            else
-                ++stepper_table_pos;
-
-            PORTA = STEPPER_ARRAY[stepper_table_pos];
-
-            if (stepper_pos == 0)
-                stepper_pos = 199;
-            else
-                --stepper_pos;
-
-        }	// Counter-Clockwise movement
-        else if(future_steps > 0)
-        {
-            if(stepper_table_pos==0)
-                stepper_table_pos=3;
-            else
-                --stepper_table_pos;
-
-            PORTA = STEPPER_ARRAY[stepper_table_pos];
-
-            if (stepper_pos == 199)
-                stepper_pos = 0;
-            else
-                ++stepper_pos;
-        }
-
-        _delay_us(CURRENT_DELAY);
-    }
-
-    _delay_ms(200);
-}
-
 #ifdef STEPPER_TEST
 void wait_for_stepper()
 {
@@ -525,115 +365,6 @@ int main(){
     state = WAITING_FOR_FIRST;
 
     zero_tray(); // set initial tray position
-
-    #ifdef STEPPER_TEST
-    lcd_message("Step test..");
-    _delay_ms(1000);
-    
-    lcd_message("Back and forth");
-    
-    set_stepper_target(150);
-    wait_for_stepper();
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-    set_stepper_target(0);
-    wait_for_stepper();
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-
-    set_stepper_target(150);
-     wait_for_stepper();
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-
-    set_stepper_target(0);
-     wait_for_stepper();
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-    set_stepper_target(150);
-    wait_for_stepper();
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-     set_stepper_target(0);
-    wait_for_stepper();
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-    set_stepper_target(150);
-     wait_for_stepper();
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-    set_stepper_target(0);
-     wait_for_stepper();
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-
-    set_stepper_target(150);
-     wait_for_stepper();  
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-
-
-    set_stepper_target(100);
-    wait_for_stepper();
-    set_stepper_target(50);
-    wait_for_stepper();
-    set_stepper_target(0);
-    wait_for_stepper();
-    set_stepper_target(150);
-    wait_for_stepper();
-    set_stepper_target(100);
-    wait_for_stepper();
-    set_stepper_target(50);
-    wait_for_stepper();
-    set_stepper_target(0);
-    wait_for_stepper();
-    set_stepper_target(150);
-    wait_for_stepper();
-    set_stepper_target(100);
-    wait_for_stepper();
-    set_stepper_target(50);
-    wait_for_stepper();
-    set_stepper_target(0);
-    wait_for_stepper();
-    set_stepper_target(150);
-    wait_for_stepper();
-    set_stepper_target(100);
-    wait_for_stepper();
-    set_stepper_target(50);
-    wait_for_stepper();
-    set_stepper_target(0);
-    wait_for_stepper();
-
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-
-    set_stepper_target(50);
-    wait_for_stepper();
-    set_stepper_target(100);
-    wait_for_stepper();
-    set_stepper_target(150);
-    wait_for_stepper();
-    set_stepper_target(0);
-    wait_for_stepper();
-    set_stepper_target(50);
-    wait_for_stepper();
-    set_stepper_target(100);
-    wait_for_stepper();
-    set_stepper_target(150);
-    wait_for_stepper();
-    set_stepper_target(0);
-    wait_for_stepper();
-    set_stepper_target(50);
-    wait_for_stepper();
-    set_stepper_target(100);
-    wait_for_stepper();
-    set_stepper_target(150);
-    wait_for_stepper();
-    set_stepper_target(0);
-    wait_for_stepper();
-    set_stepper_target(50);
-    wait_for_stepper();
-    set_stepper_target(100);
-    wait_for_stepper();
-    set_stepper_target(150);
-    wait_for_stepper();
-    set_stepper_target(0);
-    wait_for_stepper();
-
-    lcd_message("Step test done");
-    while(1);
-    #endif
-
     set_belt(1); // start DC motor
 
     uint8_t drop_step = 0, drop_idx = 0;
