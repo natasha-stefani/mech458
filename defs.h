@@ -1,6 +1,6 @@
 #pragma once
 
-
+// Stepper motor direction tracking
 typedef enum
 {
     STEPPER_CW,
@@ -8,6 +8,7 @@ typedef enum
     STOP
 } direction_t;
 
+// Item classification
 typedef enum
 {
     WHITE,
@@ -17,15 +18,3 @@ typedef enum
     UNKNOWN,
     DUMMY
 } material_t;
-
-typedef enum
-{
-    MOVE,
-    WAIT
-} stepper_instr_t;
-
-typedef struct stepper_task_t
-{
-    stepper_instr_t instr;
-    uint16_t val;
-} stepper_task_t;

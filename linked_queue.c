@@ -1,40 +1,7 @@
-/* Solution Set for the LinkedQueue.c */
-/* 	
-	Course		: UVic Mechatronics 458
-	Milestone	: 3
-	Title		: Data structures for MCUs and the Linked Queue Library
-
-	Name 1:					Student ID:
-	Name 2:					Student ID:
-	
-	Description: You can change the following after you read it.
-	
-	This main routine will only serve as a testing routine for now. At some point you can comment out
-	The main routine, and can use the following library of functions in your other applications
-
-	To do this...make sure both the .C file and the .H file are in the same directory as the .C file
-	with the MAIN routine (this will make it more convenient)
-*/
-
 /* include libraries */
 #include <stdlib.h>
 #include <avr/io.h>
-#include "linked_queue.h" 	/* This is the attached header file, which cleans things up */
-							/* Make sure you read it!!! */
-/* global variables */
-/* Avoid using these */
-
-
-
-
-/**************************************************************************************/
-/***************************** SUBROUTINES ********************************************/
-/**************************************************************************************/
-
-
-
-
-
+#include "linked_queue.h"
 
 
 /**************************************************************************************
@@ -48,9 +15,6 @@ void setup(link **h,link **t){
 	return;
 }/*setup*/
 
-
-
-
 /**************************************************************************************
 * DESC: This initializes a link and returns the pointer to the new link or NULL if error 
 * INPUT: the head and tail pointers by reference
@@ -61,9 +25,6 @@ void initLink(link **newLink){
 	(*newLink)->next = NULL;
 	return;
 }/*initLink*/
-
-
-
 
 /****************************************************************************************
 *  DESC: Accepts as input a new link by reference, and assigns the head and tail		
@@ -88,9 +49,6 @@ void enqueue(link **h, link **t, link **nL){
 	return;
 }/*enqueue*/
 
-
-
-
 /**************************************************************************************
 * DESC : Removes the link from the head of the list and assigns it to deQueuedLink
 * INPUT: The head and tail pointers, and a ptr 'deQueuedLink' 
@@ -112,9 +70,6 @@ void dequeue(link **h, link **t, link **deQueuedLink){
 	return;
 }/*dequeue*/
 
-
-
-
 /**************************************************************************************
 * DESC: Peeks at the first element in the list
 * INPUT: The head pointer
@@ -124,10 +79,6 @@ void dequeue(link **h, link **t, link **deQueuedLink){
 element firstValue(link *h){
 	return(h->e);
 }/*firstValue*/
-
-
-
-
 
 /**************************************************************************************
 * DESC: deallocates (frees) all the memory consumed by the Queue
@@ -150,10 +101,6 @@ void clearQueue(link **h, link **t){
 	return;
 }/*clearQueue*/
 
-
-
-
-
 /**************************************************************************************
 * DESC: Checks to see whether the queue is empty or not
 * INPUT: The head pointer
@@ -164,10 +111,6 @@ char isEmpty(link *h){
 	/* ENTER YOUR CODE HERE */
 	return(h == NULL);
 }/*isEmpty*/
-
-
-
-
 
 /**************************************************************************************
 * DESC: Obtains the number of links in the queue
@@ -191,4 +134,3 @@ int size(link *h){
 	
 	return(numElements);
 }/*size*/
-

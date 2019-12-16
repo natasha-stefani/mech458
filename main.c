@@ -1,4 +1,12 @@
-// Status: Final demo candidate
+/* Mech 458 Project
+
+Status: Final demo candidate
+
+Andres Martinez
+Natasha Stefani
+Ao Li
+
+*/
 
 # define F_CPU 8000000UL // suppress compiler warnings
 
@@ -12,8 +20,9 @@
 #include "linked_queue.h"
 #include "defs.h"
 
-//#define LCD_DEBUG // Have LCD show current sorting progress
+//#define LCD_DEBUG // Have LCD show most recent item classification
 
+// State machine values
 typedef enum
 {
     WAITING_FOR_FIRST,
@@ -52,73 +61,82 @@ const uint16_t ACCEL_TABLE[] =
        4950,
        4910
 };
-
+// Stepper motor deceleration profile
 const uint16_t * DECEL_TABLE = ACCEL_TABLE;
 
+// Calculate the size of the stepper motor acceleration table
 const uint8_t ACCEL_TABLE_SIZE = sizeof(ACCEL_TABLE) / sizeof(uint16_t);
 const uint8_t DECEL_TABLE_SIZE = sizeof(DECEL_TABLE) / sizeof(uint16_t);
 volatile int8_t accel_idx;  // initializing index for acceleration
 
 // State transition control
-volatile state_t state;
-volatile uint8_t BUCKET_COUNT;
-volatile uint8_t GATE_COUNT;
-volatile uint8_t PAUSE_flag;
-volatile uint8_t RAMPDOWN_flag;
-volatile uint8_t rampdown_time_reached;
-#define DEBOUNCE_DELAY_MS 50
+volatile state_t state; // State machine tracking
+volatile uint8_t bucket_count; // Number of dropped items
+volatile uint8_t gate_count; // Number of items that have passed EX
+volatile uint8_t pause_flag; // Pause button has been pressed
+volatile uint8_t rampdown_flag; // Rampdown button has been pressed
+volatile uint8_t rampdown_time_reached; // Rampdown timer has counted down
+#define DEBOUNCE_DELAY_MS 50 // Pause and rampdown button debounce delay
 
 // Item queue
-link * head, * tail, * unknown_item;
+link * head, * tail, * unknown_item; // Item queue tracking
 
 // Stepper motor control
 const unsigned char STEPPER_ARRAY[] = {0b110110,0b101110,0b101101,0b110101};
-volatile int8_t stepper_table_pos;
-volatile uint8_t stepper_pos, target_position;
-#define REVERSAL_DELAY 14500
-#define REVERSAL_COUNTDOWN_MS 60 // was 75
+volatile int8_t stepper_table_pos; // Stepper motor table increment
+volatile uint8_t stepper_pos, target_position; // Current and target stepper position
+// Delay on stepper motor reversal
+#define REVERSAL_DELAY 14500 
+#define REVERSAL_COUNTDOWN_MS 60
+// Metal and plastic drop timing parameters
 #define METAL_DROP_STEP 55
 #define PLASTIC_DROP_STEP 58
 #define METAL_IDX 2
 #define PLASTIC_IDX 0
 #define ZEROING_OFFSET 9
+// Current stepper motor delay
 volatile uint16_t CURRENT_DELAY = 14000;
 
-// Item categorization
+// ADC categorization value boundaries
 #define STEEL_BOUND 350
 #define WHITE_BOUND 800
 #define BLACK_BOUND 969
 
-//Controlling bucket count
-material_t SORTING_type;
-uint8_t BLK_BUCKET_COUNT;
-uint8_t WHITE_BUCKET_COUNT;
-uint8_t STEEL_BUCKET_COUNT;
-uint8_t ALUM_BUCKET_COUNT;
-uint8_t UK_BUCKET_COUNT;
-
-volatile uint8_t BLK_COUNT;
-volatile uint8_t WHITE_COUNT;
-volatile uint8_t STEEL_COUNT;
-volatile uint8_t ALUM_COUNT;
+// Item drop and categorization tracking
+material_t sorting_type; // Currently item type
+// Bucket counts for different item types
+uint8_t blk_bucket_count;
+uint8_t white_bucket_count;
+uint8_t steel_bucket_count;
+uint8_t alum_bucket_count;
+uint8_t uk_bucket_count; // Unclassified item count
+// Categorization counts for different item types
+volatile uint8_t blk_count;
+volatile uint8_t white_count;
+volatile uint8_t steel_count;
+volatile uint8_t alum_count;
 
 #ifdef LCD_DEBUG
-volatile uint16_t ADC_count;
+// Number of ADC measurements for current item categorization
+volatile uint16_t adc_count;
 #endif
+// Minimum ADC measurement for current item categorization
 volatile uint16_t reflect_min;
 
-// Belt control
-#define SORTING_DUTY_CYCLE 80 //0x38 56 // Expressed as ratio of 0xff (i.e. 0x80 = 50% duty)
+// Belt speed control
+#define SORTING_DUTY_CYCLE 80 // (i.e. 0x80 = 50% duty)
 
-// Timer control
+// Timer prescale values
 #define TIMER0_PRESCALE _BV(CS01) | _BV(CS00) // Prescale /64 -> PWM timer
 #define TIMER1_PRESCALE _BV(CS12) // Prescale /256 -> Countdown timer
 #define TIMER2_PRESCALE _BV(CS22) | _BV(CS21) | _BV(CS20) // Prescale 1024 -> Rampdown timer
 #define TIMER3_PRESCALE _BV (CS31)  //  Prescale /8 -> Stepper timer
+// Countdown timer flag
 volatile uint8_t countdown_reached = 1;
 
-// timer 1 millisecond countdown
-// input value must be less than 2100
+//--------------------  restart_countdown --------------------
+// Starts asynchronous millisecond countdown timer
+// Input: Timer countdown in milliseconds
 void restart_countdown(uint16_t ms)
 {
     /* Initialize Timer 1 to zero */
@@ -132,7 +150,8 @@ void restart_countdown(uint16_t ms)
     TCCR1B |= TIMER1_PRESCALE;
 }
 
-// timer 2 countdown - hard-coded for 5 seconds
+//--------------------  start_rampdown_timer --------------------
+// Starts asynchronous 5-second countdown timer
 void start_rampdown_timer()
 {
     /* Initialize Timer 1 to zero */
@@ -147,6 +166,8 @@ void start_rampdown_timer()
 }
 
 //--------------------  set_belt  --------------------
+// Starts or stops the conveyor belt
+// Input: Boolean value (1 or 0) corresponding to whether the belt is on or off
 inline void set_belt(char is_on)
 {
     if (is_on)
@@ -156,6 +177,8 @@ inline void set_belt(char is_on)
 }
 
 //--------------------  stepper_movement  --------------------
+// Moves the stepper motor by one increment in the specified direction
+// Input: Movement direction
 static inline void stepper_movement (direction_t dir)
 {
 
@@ -179,56 +202,62 @@ static inline void stepper_movement (direction_t dir)
 }
 
 //--------------------  categorize  --------------------
+// Converts the raw ADC minimum to an item classification
+// Input: Minimum ADC reflectivity
+// Output: Item category
 inline material_t categorize(uint16_t reflect_min)
 {
     if (reflect_min >= BLACK_BOUND)
     {
-        ++BLK_COUNT;
+        ++blk_count;
         return BLACK;
     }
     else if (reflect_min < BLACK_BOUND && reflect_min >= WHITE_BOUND)
     {
-        ++WHITE_COUNT;
+        ++white_count;
         return WHITE;
     }
     else if (reflect_min < WHITE_BOUND && reflect_min >= STEEL_BOUND)
     {
-        ++STEEL_COUNT;
+        ++steel_count;
         return STEEL;
     }
     else
     {
-        ++ALUM_COUNT;
+        ++alum_count;
         return ALUM;
     }
 }
 
 //--------------------  Adjust bucket  --------------------
+// Updates the dropped item counts based on the item at the head of the queue
 inline void adjust_bucket()
 {
-    ++BUCKET_COUNT;
+    ++bucket_count;
 
-    switch(SORTING_type)
+    switch(sorting_type)
     {
         case (WHITE):
-            ++WHITE_BUCKET_COUNT;
+            ++white_bucket_count;
         break;
         case (BLACK):
-            ++BLK_BUCKET_COUNT;
+            ++blk_bucket_count;
         break;
         case (STEEL):
-            ++STEEL_BUCKET_COUNT;
+            ++steel_bucket_count;
         break;
         case (ALUM):
-            ++ALUM_BUCKET_COUNT;
+            ++alum_bucket_count;
         break;
         default:
-            ++UK_BUCKET_COUNT;
+            ++uk_bucket_count;
         break;
     }
 }
 
 //--------------------  lcd_message  --------------------
+// Clears LCD screen and outputs a single line string
+// Input: char buffer with the string message
 static inline void lcd_message(const char * msg)
 {
     LCDClear();
@@ -237,6 +266,8 @@ static inline void lcd_message(const char * msg)
 }
 
 //--------------------   zero_tray   --------------------
+// Calibrates the stepper motor position based on the hall effect sensor
+// and shifts the motor zero position to a hardcoded offset
 void zero_tray()
 {
     lcd_message("Calibrating tray..");
@@ -253,17 +284,9 @@ void zero_tray()
     lcd_message("Waiting..");
 }
 
-#ifdef STEPPER_TEST
-void wait_for_stepper()
-{
-    while(target_position != stepper_pos)
-        _delay_ms(1);
-
-    _delay_ms(REVERSAL_COUNTDOWN_MS);
-}
-#endif
-
 //--------------------   Set_stepper_target   --------------------
+// Sets the stepper motor to a new target position
+// Input: Target position (0 to 150)
 inline void set_stepper_target(uint8_t target)
 {
     target_position = target;
@@ -351,7 +374,7 @@ int main(){
     // Enable all interrupts
     sei();	// Note this sets the Global Enable for all interrupts
 
-    // init linked queue
+    // Initialize item queue
     setup(&head,&tail);
     link * new_link;
     initLink(&new_link);
@@ -360,45 +383,53 @@ int main(){
     enqueue(&head,&tail,&new_link);
     unknown_item = head;
 
-    // set initial state
+    // Set initial state
     state = WAITING_FOR_FIRST;
 
     zero_tray(); // set initial tray position
     set_belt(1); // start DC motor
-
+	
+	// Current item drop step and target drop speed
     uint8_t drop_step = 0, drop_idx = 0;
 
-    // main program loop starts
+	// Main program loop
     while(1)
     {
-        if(RAMPDOWN_flag !=0 && rampdown_time_reached)
+		// Check if rampdown has been triggered and rampdown timer has elapsed
+        if(rampdown_flag !=0 && rampdown_time_reached)
         {
             EICRA &= ~_BV(ISC01) | ~_BV(ISC00); // disable OR interrupt
 
-            if (head == tail)
+            if (head == tail) // If no items left in queue, then proceed to terminal rampdown state
                 state = RAMPDOWN;
         }
 
         _delay_ms(1);
+	    // State machine
         switch(state)
         {
+			// System is currently waiting for a classified item to be placed on the queue
             case WAITING_FOR_FIRST:
             set_belt(1);
-
             break;
 
+			// The linked queue head has been updated and the system is re-targeting the
+			// stepper motor for the new item
             case MOVING_ITEM_TO_GATE:;
 
             material_t future_item_type;
             ATOMIC_BLOCK(ATOMIC_FORCEON)
             {
+				// Get new item type from the head of the queue
                 future_item_type = head->e.item_type;
             }
             
-            SORTING_type = future_item_type;
+            sorting_type = future_item_type;
 
             uint8_t future_target_position = stepper_pos;
             state = GATE_CHECK;
+			// Adjust the stepper motor posisition based on the item type
+			// and reset the drop step and drop index
             switch(future_item_type)
             {
                 case (WHITE):
@@ -421,6 +452,7 @@ int main(){
                     drop_step = METAL_DROP_STEP;
                     drop_idx = METAL_IDX;
                 break;              
+				// Error states to denote that head item is unclassified or has nonsense value
                 case (UNKNOWN):
                     LCDClear();
                     LCDWriteString("UNKNOWN");
@@ -438,12 +470,15 @@ int main(){
                 break;
             }
 
+			// Set new stepper motor position
             set_stepper_target(future_target_position);
-
             break;
 
             case GATE_CHECK:;
-            int16_t remaining_steps;
+			
+            // Calculate the remaining number of steps from the current stepper position
+			// to the target position
+			int16_t remaining_steps;
             ATOMIC_BLOCK(ATOMIC_FORCEON)
             {
                 remaining_steps = target_position - stepper_pos;
@@ -453,11 +488,14 @@ int main(){
             else if (remaining_steps < -100)
                 remaining_steps =  200 - abs(remaining_steps);
 
+			// If the stepper position is not positioned within the drop window, then stop the belt
             if (abs(remaining_steps) > drop_step)
             {
                 set_belt(0);
                 break;
             }
+			// Else if the stepper is within the drop window, but not moving fast enough for a centered
+			// drop, then stop the belt
             else if (CURRENT_DELAY > ACCEL_TABLE[drop_idx] && abs(remaining_steps) != 0)
             {
                 set_belt(0);
@@ -465,28 +503,34 @@ int main(){
             }
             else
             {
-                if (BUCKET_COUNT + 1 == GATE_COUNT)
+				// If an item has passed the gate and is ready to be dropped..
+                if (bucket_count + 1 == gate_count)
                 {
                     set_belt(1);
+					// Give the item time to fall
                     if (remaining_steps == 0)
                     {
                         _delay_ms(150);
                     }
                 }
 
+				// If item has dropped
                 if (remaining_steps == 0)
                 {
+					// Update the bucket count
                     adjust_bucket();
                     
                     link * rtn_link;
                     ATOMIC_BLOCK(ATOMIC_FORCEON)
                     {
+						// Take the item off the queue
                         dequeue(&head,&tail,&rtn_link);
                     }
 
-                    #ifdef LCD_DEBUG // print LCD debug output??
+                    #ifdef LCD_DEBUG 
                     LCDClear();
-                    switch(rtn_link->e.item_type) // should do a null check...
+					// Print the recently dropped item type to the LCD
+                    switch(rtn_link->e.item_type)
                     {
                         case (WHITE):
                         LCDWriteString("WHITE");
@@ -507,27 +551,35 @@ int main(){
                         LCDWriteString("GARBAGE");
                         break;
                     }
+					// Print the dropped item reflectivity
                     LCDWriteIntXY(0,1,rtn_link->e.item_min,4);
+					// Print the queue size after dropping
                     LCDWriteIntXY(14,0,size(head),2);
-                    LCDWriteIntXY(6,1,ADC_count,5);
+					// Print the ADC measurement count for the dropped item
+                    LCDWriteIntXY(6,1,adc_count,5);
                     _delay_ms(20);
                     #endif
 
+					// Free the memory allocated for the dropped item
                     free(rtn_link);
 
+					// Determine the next state based on the item type and whether
+					// there is another piece already past the gate
                     material_t head_type;
                     ATOMIC_BLOCK(ATOMIC_FORCEON)
                     {
                         head_type = head->e.item_type;
                     }
-
+                    // If a classified item is at the head of the queue...
                     if (head_type == ALUM || head_type == STEEL || head_type == WHITE || head_type == BLACK)
                     {
-                        // is real item at head
-                        if(BUCKET_COUNT == GATE_COUNT){
+						// ... and there is not another item past the gate
+                        if(bucket_count == gate_count)
+						{
                             set_belt(1);
                             state = WAITING_FOR_FIRST;
                         }
+						// ... and there is another item past the gate
                         else
                             state = MOVING_ITEM_TO_GATE;
                     }
@@ -538,6 +590,7 @@ int main(){
                 }
             }
             break;
+			// If bad ISR state triggered, then stop the system and display error message
             case BADISR:
 
             set_belt(0);
@@ -547,6 +600,7 @@ int main(){
 
             break;
 
+			// If bad item classification, then stop the system and display error message
             case BADITEM:
 
             set_belt(0);
@@ -554,26 +608,28 @@ int main(){
             
             break;
 
+			// If system has been paused, then display paused message, 
+			// bucket counts, and classification counts
             case PAUSE_STAGE:;
             LCDClear();
             lcd_message("Paused!");
             _delay_ms(1000);
-            //set_belt(0);
-            uint8_t blk_belt = BLK_COUNT - BLK_BUCKET_COUNT;
-            uint8_t white_belt = WHITE_COUNT - WHITE_BUCKET_COUNT;
-            uint8_t steel_belt = STEEL_COUNT - STEEL_BUCKET_COUNT;
-            uint8_t alum_belt = ALUM_COUNT - ALUM_BUCKET_COUNT;
+
+            uint8_t blk_belt = blk_count - blk_bucket_count;
+            uint8_t white_belt = white_count - white_bucket_count;
+            uint8_t steel_belt = steel_count - steel_bucket_count;
+            uint8_t alum_belt = alum_count - alum_bucket_count;
             
             //what is in the bucket
             LCDClear();
             LCDWriteString(" B");
-            LCDWriteIntXY(2,0,BLK_BUCKET_COUNT,2);
+            LCDWriteIntXY(2,0,blk_bucket_count,2);
             LCDWriteString(" W");
-            LCDWriteIntXY(6,0,WHITE_BUCKET_COUNT,2);
+            LCDWriteIntXY(6,0,white_bucket_count,2);
             LCDWriteString(" S");
-            LCDWriteIntXY(10,0,STEEL_BUCKET_COUNT,2);
+            LCDWriteIntXY(10,0,steel_bucket_count,2);
             LCDWriteString(" A");
-            LCDWriteIntXY(14,0,ALUM_BUCKET_COUNT,2);
+            LCDWriteIntXY(14,0,alum_bucket_count,2);
 
             // what is on the belt
             LCDWriteIntXY(1,1,blk_belt,3);
@@ -582,28 +638,32 @@ int main(){
             LCDWriteIntXY(13,1,alum_belt,3);
 
             _delay_ms(500);
-
-            while(PAUSE_flag);
+			// Spin the CPU until the pause flag has been unset
+            while(pause_flag);
 
             LCDClear();
 
             state = WAITING_FOR_FIRST;
-
             break;
+
+			// If rampdown has been triggered, the timer has elapsed, 
+			// and no more items are in the queue...
             case RAMPDOWN:;
+			// Stop the system
             set_belt(0);
             cli();
 
+			// Display final bucket counts
             LCDClear();
             LCDWriteString("Rampdown!");
             LCDWriteStringXY(0,1," B");
-            LCDWriteIntXY(2,1,BLK_BUCKET_COUNT,2);
+            LCDWriteIntXY(2,1,blk_bucket_count,2);
             LCDWriteString(" W");
-            LCDWriteIntXY(6,1,WHITE_BUCKET_COUNT,2);
+            LCDWriteIntXY(6,1,white_bucket_count,2);
             LCDWriteString(" S");
-            LCDWriteIntXY(10,1,STEEL_BUCKET_COUNT,2);
+            LCDWriteIntXY(10,1,steel_bucket_count,2);
             LCDWriteString(" A");
-            LCDWriteIntXY(14,1,ALUM_BUCKET_COUNT,2);
+            LCDWriteIntXY(14,1,alum_bucket_count,2);
 
             _delay_ms(1000);
 
@@ -621,18 +681,20 @@ int main(){
 // Collects ADC conversion result
 ISR(ADC_vect)
 {
+	// Find the new minimum
     if(reflect_min > ADC)
         reflect_min = ADC;
 
     #ifdef LCD_DEBUG
-    ++ADC_count;
+    ++adc_count;
     #endif
 
+	// If item is still in front of the ADC, then keep taking measurements
     if ((PIND & 0x01) > 0)
         ADCSRA |= _BV(ADSC);
+    // Else classify the unknown piece
     else
     {
-        // classify unknown piece
         unknown_item->e.item_min = reflect_min;
         unknown_item->e.item_type = categorize(unknown_item->e.item_min);
         unknown_item = unknown_item->next;
@@ -643,12 +705,14 @@ ISR(ADC_vect)
 // Resets the ADC Count and starts conversion
 ISR(INT0_vect)
 {
+	// reset reflectivity minimum for next item
     reflect_min = 1023;
 
     #ifdef LCD_DEBUG
-    ADC_count = 0;
+	// reset measurement count
+    adc_count = 0;
     #endif
-
+	// start first measurement
     ADCSRA |= _BV(ADSC);
 }
 
@@ -673,27 +737,26 @@ ISR(INT2_vect)
 {
     set_belt(0);
 
-    if(BUCKET_COUNT == GATE_COUNT)
+    if(bucket_count == gate_count)
         state = MOVING_ITEM_TO_GATE;
     else
         state = GATE_CHECK;
 
-    ++GATE_COUNT;
+    ++gate_count;
 }
 
 //-------------------- PAUSE --------------------
 // Starts or stops the belt
-// Will need to also stop to pause the stepper motor as well.
 ISR(INT6_vect)
 {
     static state_t old_state;
     static uint8_t PAUSE_belt;
     
-    if (PAUSE_flag == 0)
+    if (pause_flag == 0)
     {
         set_belt(0);
         _delay_ms(DEBOUNCE_DELAY_MS);
-        PAUSE_flag = 1;       
+        pause_flag = 1;       
         old_state = state;
         state = PAUSE_STAGE;
         
@@ -717,7 +780,7 @@ ISR(INT6_vect)
             set_belt(0);
             
         // change the state
-        PAUSE_flag = 0;     
+        pause_flag = 0;     
         state = old_state;   
     } 
 }
@@ -729,26 +792,30 @@ ISR(INT7_vect)
     //debounce
     _delay_ms(DEBOUNCE_DELAY_MS);
     
-    RAMPDOWN_flag = 1;
+    rampdown_flag = 1;
     start_rampdown_timer();
 }
 
 //-------------------- TIMER 3 --------------------
-// Moves one step in the stepper.
+// Asynchronous stepper motor control
+// Calculates time delay based on acceleration profile and 
+// moves the stepper by one increment
 ISR(TIMER3_COMPA_vect)
 {
-    static direction_t curr_direction = STOP;
-    static direction_t prev_direction = STOP;
+    static direction_t curr_direction = STOP; // current stepper travel direction
+    static direction_t prev_direction = STOP; // previous stepper travel direction
     // calculate which way you need to go
     // CCW -> Positive future steps
     // CW  -> Negative future steps
 
-    // checking for the timer to be complete between switching directions
+	// Timer used to ensure that stepper has sufficient delay before changing direction
     static uint8_t stop_switch_flag = 0;
     if(stop_switch_flag)
     {
+		// Check that countdown has finished before trying to restart stepper
         if (countdown_reached)
         {
+			// reset flags
             countdown_reached = 0;
             stop_switch_flag = 0;
         }
@@ -756,13 +823,15 @@ ISR(TIMER3_COMPA_vect)
             return;
     }
 
-    // Determining future steps
+    // Determining number of future steps needed to reach destination
     int16_t future_steps = target_position - stepper_pos;
     if (future_steps > 100)
         future_steps = - 200 + future_steps;
     else if (future_steps < -100)
         future_steps =  200 - abs(future_steps);
     
+	// If making a 180 degree movement, then keep the stepper moving in
+	// the same direction to avoid an unnecessary stop-and-reverse delay
     if (future_steps == 100 && prev_direction == STEPPER_CW)
         future_steps = -100;
     else if (future_steps == -100 && prev_direction == STEPPER_CCW)
@@ -784,14 +853,16 @@ ISR(TIMER3_COMPA_vect)
 
     if (curr_direction == prev_direction) // cruising or stopped
     {
+		// If stepper still stopped, then do nothing
         if (curr_direction == STOP)
             goto ISR_TIMER_RESET;
-
+		// If nearing end of movement, then decelerate
         if (abs(future_steps) < DECEL_TABLE_SIZE)
         {
             if (CURRENT_DELAY < DECEL_TABLE[abs(future_steps)])
                 CURRENT_DELAY = DECEL_TABLE[abs(future_steps)];
         }
+		// Else adjust velocity based on acceleration profile position
         else
         {
             if (accel_idx < ACCEL_TABLE_SIZE - 1)
@@ -803,6 +874,7 @@ ISR(TIMER3_COMPA_vect)
     }
     else if (prev_direction == STOP) // starting
     {
+		// If starting, then set velocity to the start of the profile
         accel_idx = 0;
 
         CURRENT_DELAY = REVERSAL_DELAY;
@@ -810,12 +882,14 @@ ISR(TIMER3_COMPA_vect)
     }
     else if (curr_direction == STOP) // stopping
     {
+		// If stopping, then reset acceleration tracking
         accel_idx = 0;
         CURRENT_DELAY = ACCEL_TABLE[0];
         goto ISR_TIMER_RESET;
     }
     else // switching directions
     {
+		// If switching direction, then start reversal delay countdown
         accel_idx = -1;
         stop_switch_flag = 1;
         restart_countdown(REVERSAL_COUNTDOWN_MS);
@@ -823,7 +897,8 @@ ISR(TIMER3_COMPA_vect)
         goto ISR_TIMER_RESET;
     }
 
-    if(future_steps < 0)
+	// Clockwise stepper movement
+    if(future_steps < 0) 
     {
         if(stepper_table_pos==3)
             stepper_table_pos=0;
@@ -837,8 +912,9 @@ ISR(TIMER3_COMPA_vect)
         else
             --stepper_pos;
 
-    }	// Counter-Clockwise movement
-    else if(future_steps > 0)
+    }	
+	// Counter-Clockwise stepper movement    
+	else if(future_steps > 0) 
     {
         if(stepper_table_pos==0)
             stepper_table_pos=3;
@@ -853,6 +929,7 @@ ISR(TIMER3_COMPA_vect)
             ++stepper_pos;
     }
 
+	// Adjust stepper motor timer and direction tracking
     ISR_TIMER_RESET:
     prev_direction = curr_direction;
     TCNT3 = 0;
@@ -860,7 +937,7 @@ ISR(TIMER3_COMPA_vect)
 }
 
 //-------------------- TIMER 1 --------------------
-// Async countdown timer
+// Async countdown timer for stepper reversal
 ISR(TIMER1_COMPA_vect)
 {
     countdown_reached = 1;
@@ -868,7 +945,7 @@ ISR(TIMER1_COMPA_vect)
 }
 
 //-------------------- TIMER 2 --------------------
-// Async countdown timer
+// Async countdown timer for rampdown
 ISR(TIMER2_COMPA_vect)
 {
     static uint16_t ramp_timer_count = 0;
@@ -883,6 +960,7 @@ ISR(TIMER2_COMPA_vect)
     TCCR2B &= ~(TIMER2_PRESCALE);  //  disable timer
 }
 
+//--------------------  
 // If an unexpected interrupt occurs
 ISR(BADISR_vect)
 {
